@@ -1,0 +1,113 @@
+import jax
+import jax.numpy as jnp
+from functools import partial
+
+from .utils import cross_entropy, accuracy
+from .model import MLP
+from .data import Task
+from .naive import _train_step
+
+
+def _loss_fn(params, X, y, model: MLP):
+    logits = model.forward(params, X)
+    return cross_entropy(logits, y)
+
+
+def _ewc_loss_fn(params, X, y, old_params, fisher, lam, model):
+    task_loss = _loss_fn(params, X, y, model)
+    penality = jax.tree.map(
+        lambda F, p, p_old: jnp.sum(F * (p - p_old) ** 2), fisher, params, old_params
+    )
+
+    total_penality = sum(jax.tree.leaves(penality))
+    return task_loss + (lam / 2) * total_penality
+
+
+@partial(jax.jit, static_argnums=(7,))
+def _ewc_train_step(params, X, y, old_params, fisher, lam, lr, model):
+    (loss, grad) = jax.value_and_grad(_ewc_loss_fn)(
+        params, X, y, old_params, fisher, lam, model
+    )
+
+    new_params = jax.tree.map(
+        lambda params, gradiant: params - lr * gradiant, params, grad
+    )
+
+    return new_params, loss
+
+
+class EWCMethod:
+    def __init__(self, lr, lr_task1, batch_size, epochs, lam, num_samples, decay=1.0):
+        self.lr = lr
+        self.lr_task1 = lr_task1
+        self.batch_size = batch_size
+        self.epochs = epochs
+        self.lam = lam
+        self.num_samples = num_samples
+        self.decay = decay
+
+    def compute_fisher(self, model: MLP, params, task: Task):
+        X = task.train_X[: self.num_samples]
+        y = task.train_y[: self.num_samples]
+
+        def single_log_likelihood(params, x, y):
+            logits = model.forward(params, x)
+            log_probs = jax.nn.log_softmax(logits)
+            return log_probs[y]
+
+        grad_fn = jax.grad(single_log_likelihood)
+        all_grad = jax.vmap(grad_fn, in_axes=(None, 0, 0))(params, X, y)
+        fisher = jax.tree.map(lambda g: jnp.mean(g**2, axis=0), all_grad)
+        return fisher
+
+    def train_task(self, model: MLP, params, state, task: Task, task_idx):
+        num_batch = task.train_X.shape[0] // self.batch_size
+
+        for ep in range(self.epochs):
+            total_loss = 0
+
+            for i in range(num_batch):
+                start = i * self.batch_size
+                end = (i + 1) * self.batch_size
+                batch_X = task.train_X[start:end]
+                batch_y = task.train_y[start:end]
+
+                if task_idx == 0:
+                    params, loss = _train_step(
+                        params, batch_X, batch_y, self.lr_task1, model
+                    )
+                else:
+                    params, loss = _ewc_train_step(
+                        params,
+                        batch_X,
+                        batch_y,
+                        state["old_params"],
+                        state["cumulative_fisher"],
+                        self.lam,
+                        self.lr,
+                        model,
+                    )
+
+                total_loss += loss
+
+            print(f"Epoch: {ep + 1} Loss: {total_loss/num_batch}")
+
+        new_fisher = self.compute_fisher(model, params, task)
+
+        if task_idx == 0:
+            new_cumulative_fisher = new_fisher
+        else:
+            new_cumulative_fisher = jax.tree.map(
+                lambda cf, nf: self.decay * cf + nf,
+                state["cumulative_fisher"],
+                new_fisher,
+            )
+
+        new_state = {"cumulative_fisher": new_cumulative_fisher, "old_params": params}
+
+        return params, new_state, total_loss / num_batch
+
+    def evaluate(self, model: MLP, params, task: Task):
+        logits = model.forward(params, task.test_X)
+        predictions = jnp.argmax(logits, axis=1)
+        return accuracy(predictions, task.test_y)
