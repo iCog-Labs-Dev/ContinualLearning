@@ -1,7 +1,5 @@
 # Baseline MLP Hyperparameter Tuning Report
-
-**Author:** Samuel  
-**Date:** 2026-04-05  
+ 
 **Framework:** JAX (from scratch, no external ML libraries)  
 **Dataset:** MNIST (60,000 train / 10,000 test)  
 **Task:** Handwritten digit classification (10 classes)
@@ -67,10 +65,3 @@ Identify the best MLP configuration for use as the baseline neural network in ou
 **Rationale:** This matches the Experimentation Protocol's specified architecture, achieves the highest accuracy (96.3%), and provides a strong baseline from which to measure catastrophic forgetting and EWC's effectiveness.
 
 ---
-
-## Next Steps
-
-- Split MNIST into sequential tasks (5 tasks, 2 classes each) per the CIL protocol
-- Demonstrate catastrophic forgetting with naive sequential training (no protection)
-- Implement EWC (Fisher Information computation + penalty term)
-- Compare naive vs EWC using Average Accuracy, Forgetting Measure, and Backward Transfer metrics

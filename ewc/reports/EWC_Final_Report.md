@@ -154,7 +154,7 @@ When training on a new task (e.g., digits 4, 5), the output neurons for old clas
 The Task-IL experiments confirm this: when forced to choose only between a task's 2 classes, accuracy on old tasks remains ~99%. The features are preserved; the output layer is broken.
 
 ### 7.2 Moving Anchor Problem
-In cumulative Fisher (Approach B), the anchor point `old_params` is updated after each task. The penalty pulls weights toward the most recent anchor, not toward each individual task's optimal point. Protection for early tasks erodes as the anchor shifts further from their optimal configuration.
+In cumulative Fisher, the anchor point `old_params` is updated after each task. The penalty pulls weights toward the most recent anchor, not toward each individual task's optimal point. Protection for early tasks erodes as the anchor shifts further from their optimal configuration.
 
 ### 7.3 Diagonal Fisher Approximation
 The full Fisher Information Matrix captures correlations between weights (e.g., weights A and B are individually unimportant but their specific combination is critical). The diagonal approximation discards all correlation information, systematically underestimating the true importance of weight configurations.
@@ -196,8 +196,3 @@ EWC has been successfully implemented from scratch in JAX and thoroughly evaluat
 - The concept of per-weight importance via Fisher Information is sound
 - EWC slows forgetting (gradual decay vs instant collapse) but cannot prevent it in CIL
 - The fundamental bottleneck is the output head, which EWC cannot adequately protect
-
-### Implications for the Quarter Plan
-- EWC serves its intended role as a baseline showing the regularization failure mode in CIL
-- The team's proposed Bayesian Causal Coding (BCC) approach, which treats weights as probability distributions and uses causal structure to direct updates, may address EWC's limitations by providing more targeted protection
-- Replay-based methods should be considered as an additional baseline for comparison
