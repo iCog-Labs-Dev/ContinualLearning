@@ -6,8 +6,20 @@ from .ewc import EWCMethod
 
 
 class EWCDRMethod(EWCMethod):
-    def __init__(self, lr, lr_task1, batch_size, epochs, lam, num_samples, decay=1.0):
-        super().__init__(lr, lr_task1, batch_size, epochs, lam, num_samples, decay)
+    def __init__(
+        self,
+        lr,
+        lr_task1,
+        batch_size,
+        epochs,
+        lam,
+        num_samples,
+        decay,
+        anchor_alpha=0.0,
+    ):
+        super().__init__(
+            lr, lr_task1, batch_size, epochs, lam, num_samples, decay, anchor_alpha
+        )
 
     def compute_fisher(self, model: MLP, params, task: Task):
         X = task.train_X[: self.num_samples]

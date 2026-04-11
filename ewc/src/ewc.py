@@ -37,7 +37,17 @@ def _ewc_train_step(params, X, y, old_params, fisher, lam, lr, model):
 
 
 class EWCMethod:
-    def __init__(self, lr, lr_task1, batch_size, epochs, lam, num_samples, decay=1.0):
+    def __init__(
+        self,
+        lr,
+        lr_task1,
+        batch_size,
+        epochs,
+        lam,
+        num_samples,
+        decay=1.0,
+        anchor_alpha=0.0,
+    ):
         self.lr = lr
         self.lr_task1 = lr_task1
         self.batch_size = batch_size
@@ -45,6 +55,7 @@ class EWCMethod:
         self.lam = lam
         self.num_samples = num_samples
         self.decay = decay
+        self.anchor_alpha = anchor_alpha
 
     def compute_fisher(self, model: MLP, params, task: Task):
         X = task.train_X[: self.num_samples]
@@ -103,7 +114,15 @@ class EWCMethod:
                 new_fisher,
             )
 
-        new_state = {"cumulative_fisher": new_cumulative_fisher, "old_params": params}
+        new_old_params = jax.tree.map(
+            lambda old, new: self.anchor_alpha * old + (1 - self.anchor_alpha) * new,
+            state["old_params"],
+            params,
+        )
+        new_state = {
+            "cumulative_fisher": new_cumulative_fisher,
+            "old_params": new_old_params,
+        }
 
         return params, new_state, total_loss / num_batch
 

@@ -41,3 +41,18 @@ def plot_accuracy_matrix(matrix, title, save_path):
     plt.tight_layout()
     plt.savefig(save_path)
     plt.show()
+
+
+def backward_transfer(matrix):
+    T = len(matrix)
+
+    bwt_sum = 0
+    for i in range(T - 2):
+        diagonal_value = matrix[i][i]
+        final_value = matrix[T - 1][i]
+
+        drop = final_value - diagonal_value
+        bwt_sum += drop
+
+    bwt = bwt_sum / (T - 1)
+    return bwt
