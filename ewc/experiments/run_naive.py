@@ -19,21 +19,41 @@ params = model.init_params(key)
 
 method = NaiveMethod(lr=0.01, batch_size=128, epochs=25)
 
-accuracy_matrix = []
+class_il_matrix = []
+task_il_matrix = []
 
 for task_idx in range(len(class_pairs)):
-    print(f"Training Task {task_idx + 1}")
+    print(f"\n--- Training Task {task_idx + 1} ---")
     params, loss = method.train_task(model, params, tasks[task_idx])
 
-    task_accuracies = []
+    class_il_accuracies = []
+    task_il_accuracies = []
+
     for eval_idx in range(len(class_pairs)):
-        acc = method.evaluate(model, params, tasks[eval_idx])
-        task_accuracies.append(acc)
+        acc_cil = method.evaluate(model, params, tasks[eval_idx], allowed_classes=None)
+        class_il_accuracies.append(acc_cil)
 
-    accuracy_matrix.append(task_accuracies)
+        acc_til = method.evaluate(
+            model, params, tasks[eval_idx], allowed_classes=tasks[eval_idx].classes
+        )
+        task_il_accuracies.append(acc_til)
 
-    for i, acc in enumerate(task_accuracies):
-        print(f"Task {i + 1}: accuracy: {acc * 100}%")
+    class_il_matrix.append(class_il_accuracies)
+    task_il_matrix.append(task_il_accuracies)
 
-print(f"Average Accuracy: {average_accuracy(accuracy_matrix) * 100}%")
-plot_accuracy_matrix(accuracy_matrix, "Naive Baseline", "plots/naive_heatmap.png")
+    for i, (acc_cil, acc_til) in enumerate(
+        zip(class_il_accuracies, task_il_accuracies)
+    ):
+        print(
+            f"Eval on Task {i + 1} -> Class-IL: {acc_cil * 100:.2f}% | Task-IL: {acc_til * 100:.2f}%"
+        )
+
+print(f"\nAverage Class-IL Accuracy: {average_accuracy(class_il_matrix) * 100:.2f}%")
+print(f"Average Task-IL Accuracy: {average_accuracy(task_il_matrix) * 100:.2f}%")
+
+plot_accuracy_matrix(
+    class_il_matrix, "Naive Baseline (Class-IL)", "plots/naive_class_il.png"
+)
+plot_accuracy_matrix(
+    task_il_matrix, "Naive Baseline (Task-IL)", "plots/naive_task_il.png"
+)

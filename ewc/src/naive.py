@@ -13,7 +13,7 @@ def _loss_fn(params, X, y, model: MLP):
 
 @partial(jax.jit, static_argnums=(4,))
 def _train_step(params, X, y, lr, model):
-    (loss, grad) = jax.value_and_grad(_loss_fn)(params, X, y, model)
+    loss, grad = jax.value_and_grad(_loss_fn)(params, X, y, model)
     new_params = jax.tree.map(
         lambda params, gradiant: params - lr * gradiant, params, grad
     )
@@ -47,7 +47,13 @@ class NaiveMethod:
 
         return params, total_loss / num_batch
 
-    def evaluate(self, model: MLP, params, task: Task):
+    def evaluate(self, model: MLP, params, task: Task, allowed_classes=None):
         logits = model.forward(params, task.test_X)
+
+        if allowed_classes is not None:
+            mask = jnp.full((logits.shape[1],), -jnp.inf)
+            mask = mask.at[jnp.array(allowed_classes)].set(0.0)
+            logits = logits + mask
+
         predictions = jnp.argmax(logits, axis=1)
         return accuracy(predictions, task.test_y)

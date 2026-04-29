@@ -25,7 +25,7 @@ def _ewc_loss_fn(params, X, y, old_params, fisher, lam, model):
 
 @partial(jax.jit, static_argnums=(7,))
 def _ewc_train_step(params, X, y, old_params, fisher, lam, lr, model):
-    (loss, grad) = jax.value_and_grad(_ewc_loss_fn)(
+    loss, grad = jax.value_and_grad(_ewc_loss_fn)(
         params, X, y, old_params, fisher, lam, model
     )
 
@@ -126,7 +126,13 @@ class EWCMethod:
 
         return params, new_state, total_loss / num_batch
 
-    def evaluate(self, model: MLP, params, task: Task):
+    def evaluate(self, model: MLP, params, task: Task, allowed_classes=None):
         logits = model.forward(params, task.test_X)
+
+        if allowed_classes is not None:
+            mask = jnp.full((logits.shape[1],), -jnp.inf)
+            mask = mask.at[jnp.array(allowed_classes)].set(0.0)
+            logits = logits + mask
+
         predictions = jnp.argmax(logits, axis=1)
         return accuracy(predictions, task.test_y)

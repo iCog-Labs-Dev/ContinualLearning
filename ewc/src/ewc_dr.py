@@ -14,7 +14,7 @@ class EWCDRMethod(EWCMethod):
         epochs,
         lam,
         num_samples,
-        decay,
+        decay=0.0,
         anchor_alpha=0.0,
     ):
         super().__init__(

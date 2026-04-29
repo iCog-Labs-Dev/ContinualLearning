@@ -27,7 +27,8 @@ method = SIMethod(
     normalize=True,
 )
 
-accuracy_matrix = []
+class_il_matrix = []
+task_il_matrix = []
 
 state = {
     "cumulative_omega": jax.tree.map(lambda p: jnp.zeros_like(p), params),
@@ -35,25 +36,43 @@ state = {
 }
 
 for task_idx in range(len(class_pairs)):
-    print(f"Training Task {task_idx + 1}")
+    print(f"\n--- Training Task {task_idx + 1} ---")
     params, state, loss = method.train_task(
         model, params, state, tasks[task_idx], task_idx
     )
 
-    task_accuracies = []
+    class_il_accuracies = []
+    task_il_accuracies = []
+
     for eval_idx in range(len(class_pairs)):
-        acc = method.evaluate(model, params, tasks[eval_idx])
-        task_accuracies.append(acc)
+        acc_cil = method.evaluate(model, params, tasks[eval_idx], allowed_classes=None)
+        class_il_accuracies.append(acc_cil)
 
-    accuracy_matrix.append(task_accuracies)
+        acc_til = method.evaluate(
+            model, params, tasks[eval_idx], allowed_classes=tasks[eval_idx].classes
+        )
+        task_il_accuracies.append(acc_til)
 
-    for i, acc in enumerate(task_accuracies):
-        print(f"Task {i + 1}: accuracy: {acc * 100}%")
+    class_il_matrix.append(class_il_accuracies)
+    task_il_matrix.append(task_il_accuracies)
 
-print(f"Average Accuracy: {average_accuracy(accuracy_matrix) * 100}%")
-print(f"Backward Transfer: {backward_transfer(accuracy_matrix) * 100}%")
+    for i, (acc_cil, acc_til) in enumerate(
+        zip(class_il_accuracies, task_il_accuracies)
+    ):
+        print(
+            f"Eval on Task {i + 1} -> Class-IL: {acc_cil * 100:.2f}% | Task-IL: {acc_til * 100:.2f}%"
+        )
+
+print(f"\nAverage Class-IL Accuracy: {average_accuracy(class_il_matrix) * 100:.2f}%")
+print(f"Average Task-IL Accuracy: {average_accuracy(task_il_matrix) * 100:.2f}%")
+
 plot_accuracy_matrix(
-    accuracy_matrix,
-    "Synaptic Intelligence Normalized version",
-    "plots/si_normalized.png",
+    class_il_matrix,
+    "Synaptic Intelligence Normalized version (Class-IL)",
+    "plots/si_normalized_class_il.png",
+)
+plot_accuracy_matrix(
+    task_il_matrix,
+    "Synaptic Intelligence Normalized version (Task-IL)",
+    "plots/si_normalized_task_il.png",
 )
