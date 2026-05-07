@@ -1,14 +1,17 @@
 # EWC in JAX — Continual Learning Baseline
 
-Implementation of Elastic Weight Consolidation (EWC) and EWC Done Right (EWC-DR) from scratch in JAX for the Continual Learning team's quarter plan.
+Implementation of Elastic Weight Consolidation (EWC), EWC Done Right (EWC-DR), Synaptic Intelligence (SI), and various Continual Learning strategies from scratch in JAX for the Continual Learning team's quarter plan.
 
 ## Overview
 
-This project evaluates EWC as a baseline continual learning method under the Class-Incremental Learning (CIL) setting on Split MNIST. Three methods are implemented and compared:
+This project evaluates EWC and other continual learning methods under the Class-Incremental Learning (CIL) and Task-Incremental Learning settings on Split MNIST. The methods implemented and compared include:
 
 - **Naive SGD** — Sequential training with no forgetting prevention
 - **EWC** — Vanilla Elastic Weight Consolidation (Kirkpatrick et al., 2017)
 - **EWC-DR** — EWC with Logits Reversal (Liu & Chang, 2026)
+- **Online EWC & Online EWC-DR** — Scalable EWC with a running EMA of Fisher Information Matrices
+- **EWC with EMA** — Exponential Moving Average for tracking model weights for testing
+- **Synaptic Intelligence (SI)** — Path integral-based parameter masking (Zenke et al., 2017)
 
 ## Results Summary
 
@@ -16,25 +19,32 @@ This project evaluates EWC as a baseline continual learning method under the Cla
 |--------|-------------------|-----------------|
 | Naive SGD | 19.7% | 0.0% |
 | EWC (lam=1000) | 19.4% | 0.0% |
-| EWC-DR (lam=100) | **30.8%** | **43.8%** |
+| EWC-DR (lam=100) | **36.1%** | **28.5%** |
 
-Full experiment reports are available in `reports/`.
+*Note: Class-IL accuracy metrics vary depending on exact settings. See the detailed reports below for full comparisons between Class-IL and Task-IL performance.*
+
+## Experiment Reports
+
+Full experiment and analysis reports have been migrated to Google Docs:
+
+- [Baseline MLP Hyperparameter Tuning Report](https://docs.google.com/document/d/1CaRuEW9mpMueLoOl1xlQAs5GnsXSjPHgP_iDikKWgt0/edit?usp=sharing)
+- [Catastrophic Forgetting Demonstration Report](https://docs.google.com/document/d/18S5AXcB8VF09Ex0_87OluSuUXz1Ib-WGdFFqdXwioHU/edit?usp=sharing)
+- [EWC Implementation and Evaluation Report](https://docs.google.com/document/d/1hDkrHsU0JGpW7Hge-PXZa5LrERt_KMJAIWPME1yAKUg/edit?usp=sharing)
+- [EWC Done Right (EWC-DR) Implementation and Results](https://docs.google.com/document/d/17EbLuT7gOoDbF9nXtc0M8odrLIw8g0oTnwY-BS0V6bY/edit?usp=sharing)
+- [EWC Stability Improvements — Experimental Report](https://docs.google.com/document/d/1CIsjc1LQVu_P9RuuKhUZ7VMYHXiw63wJx9LNz4acdzI/edit?usp=sharing)
+- [Online EWC and EWC-DR Variants — Experiment Report](https://docs.google.com/document/d/13FpCt4lepfR9fm6WmTPI0OAF1vHAPLxFk70wAeg1CaU/edit?usp=sharing)
+- [Synaptic Intelligence (SI) — Implementation and Evaluation Report](https://docs.google.com/document/d/1bjMCOO00ndN99X_aBiZultrnyKNVU0kvkcVjHiSFLZY/edit?usp=sharing)
+- [Task-IL vs Class-IL: A Comparative Analysis](https://docs.google.com/document/d/1G4tlfo3IEy38hbiTihRjqsM50jdScIIGnJ71dO4DTjs/edit?usp=sharing)
 
 ## Project Structure
 
 ```
-ewc_jax/
+ewc/
 ├── README.md
 ├── requirements.txt
-├── .gitignore
-├── reports/                     # Experiment reports
-│   ├── Baseline_MLP_Report.md
-│   ├── Catastrophic_Forgetting_Report.md
-│   ├── EWC_Final_Report.md
-│   └── EWC_DR_Report.md
 ├── plots/                       # Generated heatmaps
 ├── notebooks/                   # Colab experiments
-│   └── EWC_Colab_Experiment_Updated.ipynb
+│   └── EWC_Colab_Experiment.ipynb
 ├── src/                         # Source code
 │   ├── __init__.py
 │   ├── model.py                 # MLP neural network
@@ -42,11 +52,16 @@ ewc_jax/
 │   ├── utils.py                 # Losses, metrics, plotting helpers
 │   ├── naive.py                 # Naive sequential baseline
 │   ├── ewc.py                   # Vanilla EWC
-│   └── ewc_dr.py                # EWC Done Right (Logits Reversal)
+│   ├── ewc_dr.py                # EWC Done Right (Logits Reversal)           
+│   └── si.py                    # Synaptic Intelligence
 └── experiments/                 # Runnable experiment scripts
     ├── run_naive.py
     ├── run_ewc.py
-    └── run_ewc_dr.py
+    ├── run_ewc_dr.py
+    ├── run_online_ewc.py
+    ├── run_online_ewc_dr.py
+    ├── run_si.py
+    └── run_ewc_with_ema.py
 ```
 
 ## Setup
@@ -57,12 +72,13 @@ pip install -r requirements.txt
 
 ## Running Experiments
 
-From the project root (`ewc_jax/`):
+From the project root (`ewc/`):
 
 ```bash
 python experiments/run_naive.py
 python experiments/run_ewc.py
 python experiments/run_ewc_dr.py
+# Run other experiments accordingly
 ```
 
 ## Configuration
@@ -82,13 +98,14 @@ Hyperparameters are set directly in each experiment script:
 ## Key Findings
 
 1. **Vanilla EWC fails in Class-IL** — performs no better than naive training (~20% avg accuracy). This is a known limitation confirmed by literature.
-2. **EWC-DR significantly improves retention** — a single-line change (negating logits during Fisher computation) fixes the gradient vanishing problem, boosting average accuracy to 30.8%.
-3. **The output head bias is the fundamental bottleneck** — Task-IL evaluation shows internal features are preserved (~99%), but the shared output head cannot maintain calibration across tasks.
+2. **EWC-DR significantly improves retention** — a single-line change (negating logits during Fisher computation) fixes the gradient vanishing problem, boosting average accuracy significantly.
+3. **The output head bias is the fundamental bottleneck** — Task-IL evaluation shows internal features are preserved (~98-99%), but the shared output head cannot maintain calibration across tasks due to recency bias.
 
 ## References
 
 - Kirkpatrick et al., "Overcoming catastrophic forgetting in neural networks" (PNAS, 2017)
 - Liu & Chang, "Elastic Weight Consolidation Done Right for Continual Learning" (arXiv:2603.18596, 2026)
+- Zenke et al., "Continual Learning Through Synaptic Intelligence" (ICML, 2017)
 
 ## Framework
 
