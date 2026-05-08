@@ -7,9 +7,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 
 from core.model import MLP
-from core.data import Task, load_mnist, split_into_tasks
+from core.data import load_mnist, split_into_tasks
 from core.metrics import average_accuracy, plot_accuracy_matrix
 from core.base import EWCState
+from core.runner import run_experiment
 from src.ewc import EWCMethod
 
 X, y, test_X, test_y = load_mnist()
@@ -29,29 +30,15 @@ method = EWCMethod(
     num_samples=300,
     decay=0.9,
 )
-
-accuracy_matrix = []
-
 state = EWCState(
     old_params=params,
     cumulative_fisher=jax.tree.map(lambda p: jnp.zeros_like(p), params),
 )
 
-for task_idx in range(len(class_pairs)):
-    print(f"Training Task {task_idx + 1}")
-    params, state, loss = method.train_task(
-        model, params, state, tasks[task_idx], task_idx
-    )
+params, _, class_il_matrix, task_il_matrix = run_experiment(method, model, params, state, tasks)
 
-    task_accuracies = []
-    for eval_idx in range(len(class_pairs)):
-        acc = method.evaluate(model, params, tasks[eval_idx])
-        task_accuracies.append(acc)
+print(f"\nAverage Class-IL Accuracy: {average_accuracy(class_il_matrix) * 100:.2f}%")
+print(f"Average Task-IL Accuracy: {average_accuracy(task_il_matrix) * 100:.2f}%")
 
-    accuracy_matrix.append(task_accuracies)
-
-    for i, acc in enumerate(task_accuracies):
-        print(f"Task {i + 1}: accuracy: {acc * 100}%")
-
-print(f"Average Accuracy: {average_accuracy(accuracy_matrix) * 100}%")
-plot_accuracy_matrix(accuracy_matrix, "online EWC", "plots/online_ewc.png")
+plot_accuracy_matrix(class_il_matrix, "Online EWC (Class-IL)", "plots/online_ewc_class_il.png")
+plot_accuracy_matrix(task_il_matrix, "Online EWC (Task-IL)", "plots/online_ewc_task_il.png")
