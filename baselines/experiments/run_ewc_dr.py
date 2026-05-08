@@ -7,9 +7,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 
 from core.model import MLP
-from core.data import Task, load_mnist, split_into_tasks
+from core.data import load_mnist, split_into_tasks
 from core.metrics import average_accuracy, plot_accuracy_matrix
 from core.base import EWCState
+from core.runner import run_experiment
 from src.ewc_dr import EWCDRMethod
 
 X, y, test_X, test_y = load_mnist()
@@ -23,45 +24,21 @@ params = model.init_params(key)
 method = EWCDRMethod(
     lr=0.001, lr_task1=0.01, batch_size=128, epochs=25, lam=100, num_samples=200
 )
-
-class_il_matrix = []
-task_il_matrix = []
-
 state = EWCState(
     old_params=params,
     cumulative_fisher=jax.tree.map(lambda p: jnp.zeros_like(p), params),
 )
 
-for task_idx in range(len(class_pairs)):
-    print(f"\n--- Training Task {task_idx + 1} ---")
-    params, state, loss = method.train_task(
-        model, params, state, tasks[task_idx], task_idx
-    )
-
-    class_il_accuracies = []
-    task_il_accuracies = []
-
-    for eval_idx in range(len(class_pairs)):
-        acc_cil = method.evaluate(model, params, tasks[eval_idx], allowed_classes=None)
-        class_il_accuracies.append(acc_cil)
-
-        acc_til = method.evaluate(
-            model, params, tasks[eval_idx], allowed_classes=tasks[eval_idx].classes
-        )
-        task_il_accuracies.append(acc_til)
-
-    class_il_matrix.append(class_il_accuracies)
-    task_il_matrix.append(task_il_accuracies)
-
-    for i, (acc_cil, acc_til) in enumerate(
-        zip(class_il_accuracies, task_il_accuracies)
-    ):
-        print(
-            f"Eval on Task {i + 1} -> Class-IL: {acc_cil * 100:.2f}% | Task-IL: {acc_til * 100:.2f}%"
-        )
+params, _, class_il_matrix, task_il_matrix = run_experiment(
+    method, model, params, state, tasks
+)
 
 print(f"\nAverage Class-IL Accuracy: {average_accuracy(class_il_matrix) * 100:.2f}%")
 print(f"Average Task-IL Accuracy: {average_accuracy(task_il_matrix) * 100:.2f}%")
-print(
-    f"Backward Transfer of Class-IL: {backward_transfer(class_il_matrix)} and Task-IL {backward_transfer(task_il_matrix)}"
+
+plot_accuracy_matrix(
+    class_il_matrix, "EWC Done Right (Class-IL)", "plots/ewc_dr_class_il.png"
+)
+plot_accuracy_matrix(
+    task_il_matrix, "EWC Done Right (Task-IL)", "plots/ewc_dr_task_il.png"
 )

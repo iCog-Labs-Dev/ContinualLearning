@@ -2,7 +2,7 @@ import jax
 import jax.numpy as jnp
 from functools import partial
 
-from core.metrics import cross_entropy, accuracy
+from core.metrics import cross_entropy
 from core.model import MLP
 from core.data import Task
 from core.base import EWCState
@@ -141,14 +141,3 @@ class EWCMethod:
             ),
             total_loss / num_batch,
         )
-
-    def evaluate(self, model: MLP, params, task: Task, allowed_classes=None):
-        logits = model.forward(params, task.test_X)
-
-        if allowed_classes is not None:
-            mask = jnp.full((logits.shape[1],), -jnp.inf)
-            mask = mask.at[jnp.array(allowed_classes)].set(0.0)
-            logits = logits + mask
-
-        predictions = jnp.argmax(logits, axis=1)
-        return accuracy(predictions, task.test_y)
