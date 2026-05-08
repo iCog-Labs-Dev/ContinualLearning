@@ -1,7 +1,7 @@
 import jax
 import jax.numpy as jnp
-from .model import MLP
-from .data import Task
+from core.model import MLP
+from core.data import Task
 from .ewc import EWCMethod
 
 

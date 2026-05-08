@@ -2,9 +2,9 @@ import jax
 import jax.numpy as jnp
 from functools import partial
 
-from .utils import cross_entropy, accuracy
-from .model import MLP
-from .data import Task
+from core.metrics import cross_entropy, accuracy
+from core.model import MLP
+from core.data import Task
 from .naive import _train_step
 
 

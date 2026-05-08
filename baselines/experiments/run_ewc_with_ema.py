@@ -4,10 +4,11 @@ import jax
 import jax.numpy as jnp
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 
-from src.model import MLP
-from src.data import Task, load_mnist, split_into_tasks
-from src.utils import average_accuracy, plot_accuracy_matrix, backward_transfer
+from core.model import MLP
+from core.data import Task, load_mnist, split_into_tasks
+from core.metrics import average_accuracy, plot_accuracy_matrix
 from src.ewc_dr import EWCDRMethod
 
 X, y, test_X, test_y = load_mnist()
@@ -26,6 +27,7 @@ method = EWCDRMethod(
     lam=1000,
     num_samples=200,
     decay=0.9,
+    anchor_alpha=0.5,
 )
 
 accuracy_matrix = []
@@ -52,7 +54,8 @@ for task_idx in range(len(class_pairs)):
         print(f"Task {i + 1}: accuracy: {acc * 100}%")
 
 print(f"Average Accuracy: {average_accuracy(accuracy_matrix) * 100}%")
-print(f"Backward Transfer: {backward_transfer(accuracy_matrix) * 100}%")
 plot_accuracy_matrix(
-    accuracy_matrix, "online EWC Done Right", "plots/online_ewc_dr.png"
+    accuracy_matrix,
+    "online EWC Done Right + Exponential Moving Average",
+    "plots/ewc_dr_with_ema.png",
 )

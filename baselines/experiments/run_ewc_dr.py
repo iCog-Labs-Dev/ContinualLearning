@@ -1,13 +1,15 @@
 import sys
 import os
 import jax
+import jax.numpy as jnp
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 
-from src.model import MLP
-from src.data import Task, load_mnist, split_into_tasks
-from src.utils import average_accuracy, plot_accuracy_matrix
-from src.naive import NaiveMethod
+from core.model import MLP
+from core.data import Task, load_mnist, split_into_tasks
+from core.metrics import average_accuracy, plot_accuracy_matrix
+from src.ewc_dr import EWCDRMethod
 
 X, y, test_X, test_y = load_mnist()
 class_pairs = [[0, 1], [2, 3], [4, 5], [6, 7], [8, 9]]
@@ -17,14 +19,23 @@ model = MLP([784, 512, 512, 10])
 key = jax.random.PRNGKey(0)
 params = model.init_params(key)
 
-method = NaiveMethod(lr=0.01, batch_size=128, epochs=25)
+method = EWCDRMethod(
+    lr=0.001, lr_task1=0.01, batch_size=128, epochs=25, lam=100, num_samples=200
+)
 
 class_il_matrix = []
 task_il_matrix = []
 
+state = {
+    "cumulative_fisher": jax.tree.map(lambda p: jnp.zeros_like(p), params),
+    "old_params": params,
+}
+
 for task_idx in range(len(class_pairs)):
     print(f"\n--- Training Task {task_idx + 1} ---")
-    params, loss = method.train_task(model, params, tasks[task_idx])
+    params, state, loss = method.train_task(
+        model, params, state, tasks[task_idx], task_idx
+    )
 
     class_il_accuracies = []
     task_il_accuracies = []
@@ -52,8 +63,8 @@ print(f"\nAverage Class-IL Accuracy: {average_accuracy(class_il_matrix) * 100:.2
 print(f"Average Task-IL Accuracy: {average_accuracy(task_il_matrix) * 100:.2f}%")
 
 plot_accuracy_matrix(
-    class_il_matrix, "Naive Baseline (Class-IL)", "plots/naive_class_il.png"
+    class_il_matrix, "EWC Done Right (Class-IL)", "plots/ewc_dr_class_il.png"
 )
 plot_accuracy_matrix(
-    task_il_matrix, "Naive Baseline (Task-IL)", "plots/naive_task_il.png"
+    task_il_matrix, "EWC Done Right (Task-IL)", "plots/ewc_dr_task_il.png"
 )
