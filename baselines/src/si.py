@@ -1,9 +1,9 @@
 import jax
 import jax.numpy as jnp
 from functools import partial
-from .model import MLP
-from .utils import cross_entropy, accuracy
-from .data import Task
+from core.model import MLP
+from core.metrics import cross_entropy, accuracy
+from core.data import Task
 
 
 def _loss_fn(params, X, y, model: MLP):

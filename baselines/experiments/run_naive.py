@@ -3,10 +3,11 @@ import os
 import jax
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 
-from src.model import MLP
-from src.data import Task, load_mnist, split_into_tasks
-from src.utils import average_accuracy, plot_accuracy_matrix
+from core.model import MLP
+from core.data import Task, load_mnist, split_into_tasks
+from core.metrics import average_accuracy, plot_accuracy_matrix
 from src.naive import NaiveMethod
 
 X, y, test_X, test_y = load_mnist()
