@@ -1,6 +1,6 @@
-# EWC in JAX — Continual Learning Baseline
+# Continual Learning Baselines in JAX
 
-Implementation of Elastic Weight Consolidation (EWC), EWC Done Right (EWC-DR), Synaptic Intelligence (SI), and various Continual Learning strategies from scratch in JAX for the Continual Learning team's quarter plan.
+Implementation of Elastic Weight Consolidation (EWC), EWC Done Right (EWC-DR), Synaptic Intelligence (SI), and various continual learning strategies from scratch in JAX for the Continual Learning team's quarter plan.
 
 ## Overview
 
@@ -39,20 +39,16 @@ Full experiment and analysis reports have been migrated to Google Docs:
 ## Project Structure
 
 ```
-ewc/
+baselines/
 ├── README.md
-├── requirements.txt
 ├── plots/                       # Generated heatmaps
 ├── notebooks/                   # Colab experiments
 │   └── EWC_Colab_Experiment.ipynb
-├── src/                         # Source code
+├── src/                         # Baseline method implementations
 │   ├── __init__.py
-│   ├── model.py                 # MLP neural network
-│   ├── data.py                  # MNIST loading and task splitting
-│   ├── utils.py                 # Losses, metrics, plotting helpers
 │   ├── naive.py                 # Naive sequential baseline
 │   ├── ewc.py                   # Vanilla EWC
-│   ├── ewc_dr.py                # EWC Done Right (Logits Reversal)           
+│   ├── ewc_dr.py                # EWC Done Right (Logits Reversal)
 │   └── si.py                    # Synaptic Intelligence
 └── experiments/                 # Runnable experiment scripts
     ├── run_naive.py
@@ -64,6 +60,12 @@ ewc/
     └── run_ewc_with_ema.py
 ```
 
+The MLP architecture, MNIST data pipeline, evaluation metrics, and
+experiment runner that all baselines share live in `core/` at the
+project root — not inside this folder. The experiment scripts add the
+project root to `sys.path` automatically so no manual configuration is
+needed.
+
 ## Setup
 
 ```bash
@@ -72,7 +74,7 @@ pip install -r requirements.txt
 
 ## Running Experiments
 
-From the project root (`ewc/`):
+From inside the `baselines/` folder:
 
 ```bash
 python experiments/run_naive.py
