@@ -9,6 +9,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 from core.model import MLP
 from core.data import Task, load_mnist, split_into_tasks
 from core.metrics import average_accuracy, plot_accuracy_matrix
+from core.base import EWCState
 from src.ewc_dr import EWCDRMethod
 
 X, y, test_X, test_y = load_mnist()
@@ -26,7 +27,10 @@ method = EWCDRMethod(
 class_il_matrix = []
 task_il_matrix = []
 
-state = {"anchors": []}
+state = EWCState(
+    old_params=params,
+    cumulative_fisher=jax.tree.map(lambda p: jnp.zeros_like(p), params),
+)
 
 for task_idx in range(len(class_pairs)):
     print(f"\n--- Training Task {task_idx + 1} ---")

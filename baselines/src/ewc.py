@@ -5,6 +5,7 @@ from functools import partial
 from core.metrics import cross_entropy, accuracy
 from core.model import MLP
 from core.data import Task
+from core.base import EWCState
 from .naive import _train_step
 
 
@@ -105,7 +106,8 @@ class EWCMethod:
                         params,
                         batch_X,
                         batch_y,
-                        anchors,
+                        state.old_params,
+                        state.cumulative_fisher,
                         self.lam,
                         self.lr,
                         model,
@@ -117,31 +119,28 @@ class EWCMethod:
 
         new_fisher = self.compute_fisher(model, params, task)
 
-        if self.decay < 1.0:
-            if task_idx == 0:
-                new_cumulative_fisher = new_fisher
-            else:
-                new_cumulative_fisher = jax.tree.map(
-                    lambda cf, nf: self.decay * cf + nf,
-                    state["cumulative_fisher"],
-                    new_fisher,
-                )
-
-            new_old_params = jax.tree.map(
-                lambda old, new: self.anchor_alpha * old
-                + (1 - self.anchor_alpha) * new,
-                state["old_params"],
-                params,
-            )
-            new_state = {
-                "cumulative_fisher": new_cumulative_fisher,
-                "old_params": new_old_params,
-            }
+        if task_idx == 0:
+            new_cumulative_fisher = new_fisher
         else:
-            new_anchor = {"fisher": new_fisher, "params": params}
-            new_state = {"anchors": state["anchors"] + [new_anchor]}
+            new_cumulative_fisher = jax.tree.map(
+                lambda cf, nf: self.decay * cf + nf,
+                state.cumulative_fisher,
+                new_fisher,
+            )
 
-        return params, new_state, total_loss / num_batch
+        new_old_params = jax.tree.map(
+            lambda old, new: self.anchor_alpha * old + (1 - self.anchor_alpha) * new,
+            state.old_params,
+            params,
+        )
+
+        return (
+            params,
+            EWCState(
+                old_params=new_old_params, cumulative_fisher=new_cumulative_fisher
+            ),
+            total_loss / num_batch,
+        )
 
     def evaluate(self, model: MLP, params, task: Task, allowed_classes=None):
         logits = model.forward(params, task.test_X)
