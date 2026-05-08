@@ -5,6 +5,7 @@ from functools import partial
 from core.metrics import cross_entropy, accuracy
 from core.model import MLP
 from core.data import Task
+from core.base import EWCState
 from .naive import _train_step
 
 
@@ -92,8 +93,8 @@ class EWCMethod:
                         params,
                         batch_X,
                         batch_y,
-                        state["old_params"],
-                        state["cumulative_fisher"],
+                        state.old_params,
+                        state.cumulative_fisher,
                         self.lam,
                         self.lr,
                         model,
@@ -110,21 +111,17 @@ class EWCMethod:
         else:
             new_cumulative_fisher = jax.tree.map(
                 lambda cf, nf: self.decay * cf + nf,
-                state["cumulative_fisher"],
+                state.cumulative_fisher,
                 new_fisher,
             )
 
         new_old_params = jax.tree.map(
             lambda old, new: self.anchor_alpha * old + (1 - self.anchor_alpha) * new,
-            state["old_params"],
+            state.old_params,
             params,
         )
-        new_state = {
-            "cumulative_fisher": new_cumulative_fisher,
-            "old_params": new_old_params,
-        }
 
-        return params, new_state, total_loss / num_batch
+        return params, EWCState(old_params=new_old_params, cumulative_fisher=new_cumulative_fisher), total_loss / num_batch
 
     def evaluate(self, model: MLP, params, task: Task, allowed_classes=None):
         logits = model.forward(params, task.test_X)
