@@ -65,14 +65,3 @@ for task_idx in range(len(class_pairs)):
 
 print(f"\nAverage Class-IL Accuracy: {average_accuracy(class_il_matrix) * 100:.2f}%")
 print(f"Average Task-IL Accuracy: {average_accuracy(task_il_matrix) * 100:.2f}%")
-
-plot_accuracy_matrix(
-    class_il_matrix,
-    "Synaptic Intelligence Normalized version (Class-IL)",
-    "plots/si_normalized_class_il.png",
-)
-plot_accuracy_matrix(
-    task_il_matrix,
-    "Synaptic Intelligence Normalized version (Task-IL)",
-    "plots/si_normalized_task_il.png",
-)

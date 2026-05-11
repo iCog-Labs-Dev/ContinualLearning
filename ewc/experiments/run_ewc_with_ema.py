@@ -36,15 +36,23 @@ state = {
     "old_params": params,
 }
 
+ema_params = params
+
 for task_idx in range(len(class_pairs)):
     print(f"Training Task {task_idx + 1}")
     params, state, loss = method.train_task(
         model, params, state, tasks[task_idx], task_idx
     )
 
+    ema_params = jax.tree.map(
+        lambda ema, new: method.anchor_alpha * ema + (1 - method.anchor_alpha) * new,
+        ema_params,
+        params,
+    )
+
     task_accuracies = []
     for eval_idx in range(len(class_pairs)):
-        acc = method.evaluate(model, params, tasks[eval_idx])
+        acc = method.evaluate(model, ema_params, tasks[eval_idx])
         task_accuracies.append(acc)
 
     accuracy_matrix.append(task_accuracies)
@@ -53,8 +61,3 @@ for task_idx in range(len(class_pairs)):
         print(f"Task {i + 1}: accuracy: {acc * 100}%")
 
 print(f"Average Accuracy: {average_accuracy(accuracy_matrix) * 100}%")
-plot_accuracy_matrix(
-    accuracy_matrix,
-    "online EWC Done Right + Exponential Moving Average",
-    "plots/ewc_dr_with_ema.png",
-)

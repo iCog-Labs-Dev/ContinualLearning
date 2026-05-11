@@ -52,4 +52,3 @@ for task_idx in range(len(class_pairs)):
         print(f"Task {i + 1}: accuracy: {acc * 100}%")
 
 print(f"Average Accuracy: {average_accuracy(accuracy_matrix) * 100}%")
-plot_accuracy_matrix(accuracy_matrix, "online EWC", "plots/online_ewc.png")

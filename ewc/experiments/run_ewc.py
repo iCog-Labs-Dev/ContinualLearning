@@ -25,10 +25,7 @@ method = EWCMethod(
 class_il_matrix = []
 task_il_matrix = []
 
-state = {
-    "cumulative_fisher": jax.tree.map(lambda p: jnp.zeros_like(p), params),
-    "old_params": params,
-}
+state = {"anchors": []}
 
 for task_idx in range(len(class_pairs)):
     print(f"Training Task {task_idx + 1}")
@@ -63,6 +60,3 @@ for task_idx in range(len(class_pairs)):
 
 print(f"\nAverage Class-IL Accuracy: {average_accuracy(class_il_matrix) * 100:.2f}%")
 print(f"Average Task-IL Accuracy: {average_accuracy(task_il_matrix) * 100:.2f}%")
-
-plot_accuracy_matrix(class_il_matrix, "Basic EWC (Class-IL)", "plots/ewc_class_il.png")
-plot_accuracy_matrix(task_il_matrix, "Basic EWC (Task-IL)", "plots/ewc_task_il.png")

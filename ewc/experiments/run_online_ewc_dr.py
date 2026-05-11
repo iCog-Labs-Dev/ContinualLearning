@@ -22,7 +22,7 @@ method = EWCDRMethod(
     lr=0.001,
     lr_task1=0.01,
     batch_size=128,
-    epochs=50,
+    epochs=25,
     lam=1000,
     num_samples=200,
     decay=0.9,
@@ -53,6 +53,3 @@ for task_idx in range(len(class_pairs)):
 
 print(f"Average Accuracy: {average_accuracy(accuracy_matrix) * 100}%")
 print(f"Backward Transfer: {backward_transfer(accuracy_matrix) * 100}%")
-plot_accuracy_matrix(
-    accuracy_matrix, "online EWC Done Right", "plots/online_ewc_dr.png"
-)

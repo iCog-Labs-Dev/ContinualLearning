@@ -7,7 +7,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from src.model import MLP
 from src.data import Task, load_mnist, split_into_tasks
-from src.utils import average_accuracy, plot_accuracy_matrix
+from src.utils import average_accuracy, plot_accuracy_matrix, backward_transfer
 from src.ewc_dr import EWCDRMethod
 
 X, y, test_X, test_y = load_mnist()
@@ -25,10 +25,7 @@ method = EWCDRMethod(
 class_il_matrix = []
 task_il_matrix = []
 
-state = {
-    "cumulative_fisher": jax.tree.map(lambda p: jnp.zeros_like(p), params),
-    "old_params": params,
-}
+state = {"anchors": []}
 
 for task_idx in range(len(class_pairs)):
     print(f"\n--- Training Task {task_idx + 1} ---")
@@ -60,10 +57,6 @@ for task_idx in range(len(class_pairs)):
 
 print(f"\nAverage Class-IL Accuracy: {average_accuracy(class_il_matrix) * 100:.2f}%")
 print(f"Average Task-IL Accuracy: {average_accuracy(task_il_matrix) * 100:.2f}%")
-
-plot_accuracy_matrix(
-    class_il_matrix, "EWC Done Right (Class-IL)", "plots/ewc_dr_class_il.png"
-)
-plot_accuracy_matrix(
-    task_il_matrix, "EWC Done Right (Task-IL)", "plots/ewc_dr_task_il.png"
+print(
+    f"Backward Transfer of Class-IL: {backward_transfer(class_il_matrix)} and Task-IL {backward_transfer(task_il_matrix)}"
 )
