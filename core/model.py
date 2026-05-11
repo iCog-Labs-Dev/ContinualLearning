@@ -39,7 +39,8 @@ class MLP:
 
     def forward_with_states(self, params, X):
         num_layers = len(params)
-        states = []
+        pre_activations = []
+        post_activations = []
         z = 0.0
         for i in range(num_layers):
             W = params[f"layer_{i + 1}"]["w"]
@@ -47,10 +48,10 @@ class MLP:
 
             if i < num_layers - 1:
                 z = X @ W + b
+                pre_activations.append(z)
                 X = jnp.maximum(0, z)
-                states.append(X)
+                post_activations.append(X)
             else:
                 z = X @ W + b
-                states.append(z)
 
-        return states, z
+        return pre_activations, post_activations, z

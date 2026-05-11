@@ -19,6 +19,12 @@ class SIState:
     cumulative_omega: Any
 
 
+@dataclass
+class CasualState:
+    old_params: Any
+    influence_scores: Any
+
+
 class ContinualLearningMethod(Protocol):
     def train_task(
         self, model: Any, params: Any, state: Any, task: Any, task_idx: int
