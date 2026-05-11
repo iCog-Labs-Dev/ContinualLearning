@@ -42,12 +42,3 @@ params, _, class_il_matrix, task_il_matrix = run_experiment(
 print(f"\nAverage Class-IL Accuracy: {average_accuracy(class_il_matrix) * 100:.2f}%")
 print(f"Average Task-IL Accuracy: {average_accuracy(task_il_matrix) * 100:.2f}%")
 print(f"Backward Transfer (Class-IL): {backward_transfer(class_il_matrix) * 100:.2f}%")
-
-plot_accuracy_matrix(
-    class_il_matrix,
-    "Online EWC Done Right (Class-IL)",
-    "plots/online_ewc_dr_class_il.png",
-)
-plot_accuracy_matrix(
-    task_il_matrix, "Online EWC Done Right (Task-IL)", "plots/online_ewc_dr_task_il.png"
-)

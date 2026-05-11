@@ -5,7 +5,7 @@ from functools import partial
 from core.metrics import cross_entropy
 from core.model import MLP
 from core.data import Task
-from core.base import EWCState
+from core.base import EWCState, EWCVanillaState
 from .naive import _train_step
 
 
@@ -18,14 +18,12 @@ def _ewc_loss_fn(params, X, y, anchors, lam, model):
     task_loss = _loss_fn(params, X, y, model)
     total_penality = 0.0
     for anchor in anchors:
-
         penality = jax.tree.map(
             lambda F, p, p_old: jnp.sum(F * (p - p_old) ** 2),
             anchor["fisher"],
             params,
             anchor["params"],
         )
-
         total_penality = total_penality + sum(jax.tree.leaves(penality))
     return task_loss + (lam / 2) * total_penality
 
@@ -96,18 +94,17 @@ class EWCMethod:
                     if self.decay < 1.0:
                         anchors = [
                             {
-                                "fisher": state["cumulative_fisher"],
-                                "params": state["old_params"],
+                                "fisher": state.cumulative_fisher,
+                                "params": state.old_params,
                             }
                         ]
                     else:
-                        anchors = state["anchors"]
+                        anchors = state.anchors
                     params, loss = _ewc_train_step(
                         params,
                         batch_X,
                         batch_y,
-                        state.old_params,
-                        state.cumulative_fisher,
+                        anchors,
                         self.lam,
                         self.lr,
                         model,
@@ -119,25 +116,32 @@ class EWCMethod:
 
         new_fisher = self.compute_fisher(model, params, task)
 
-        if task_idx == 0:
-            new_cumulative_fisher = new_fisher
-        else:
-            new_cumulative_fisher = jax.tree.map(
-                lambda cf, nf: self.decay * cf + nf,
-                state.cumulative_fisher,
-                new_fisher,
+        if self.decay < 1.0:
+            if task_idx == 0:
+                new_cumulative_fisher = new_fisher
+            else:
+                new_cumulative_fisher = jax.tree.map(
+                    lambda cf, nf: self.decay * cf + nf,
+                    state.cumulative_fisher,
+                    new_fisher,
+                )
+            new_old_params = jax.tree.map(
+                lambda old, new: self.anchor_alpha * old
+                + (1 - self.anchor_alpha) * new,
+                state.old_params,
+                params,
             )
-
-        new_old_params = jax.tree.map(
-            lambda old, new: self.anchor_alpha * old + (1 - self.anchor_alpha) * new,
-            state.old_params,
-            params,
-        )
-
-        return (
-            params,
-            EWCState(
-                old_params=new_old_params, cumulative_fisher=new_cumulative_fisher
-            ),
-            total_loss / num_batch,
-        )
+            return (
+                params,
+                EWCState(
+                    old_params=new_old_params, cumulative_fisher=new_cumulative_fisher
+                ),
+                total_loss / num_batch,
+            )
+        else:
+            new_anchor = {"fisher": new_fisher, "params": params}
+            return (
+                params,
+                EWCVanillaState(anchors=state.anchors + [new_anchor]),
+                total_loss / num_batch,
+            )

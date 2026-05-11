@@ -27,10 +27,3 @@ params, _, class_il_matrix, task_il_matrix = run_experiment(
 
 print(f"\nAverage Class-IL Accuracy: {average_accuracy(class_il_matrix) * 100:.2f}%")
 print(f"Average Task-IL Accuracy: {average_accuracy(task_il_matrix) * 100:.2f}%")
-
-plot_accuracy_matrix(
-    class_il_matrix, "Naive Baseline (Class-IL)", "plots/naive_class_il.png"
-)
-plot_accuracy_matrix(
-    task_il_matrix, "Naive Baseline (Task-IL)", "plots/naive_task_il.png"
-)

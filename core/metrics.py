@@ -22,7 +22,7 @@ def backward_transfer(matrix):
     T = len(matrix)
 
     bwt_sum = 0
-    for i in range(T - 2):
+    for i in range(T - 1):
         diagonal_value = matrix[i][i]
         final_value = matrix[T - 1][i]
 
