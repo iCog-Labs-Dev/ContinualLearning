@@ -34,19 +34,10 @@ state = SIState(
     cumulative_omega=jax.tree.map(lambda p: jnp.zeros_like(p), params),
 )
 
-params, _, class_il_matrix, task_il_matrix = run_experiment(method, model, params, state, tasks)
+params, _, class_il_matrix, task_il_matrix = run_experiment(
+    method, model, params, state, tasks
+)
 
 print(f"\nAverage Class-IL Accuracy: {average_accuracy(class_il_matrix) * 100:.2f}%")
 print(f"Average Task-IL Accuracy: {average_accuracy(task_il_matrix) * 100:.2f}%")
 print(f"Backward Transfer (Class-IL): {backward_transfer(class_il_matrix) * 100:.2f}%")
-
-plot_accuracy_matrix(
-    class_il_matrix,
-    "Synaptic Intelligence Normalized (Class-IL)",
-    "plots/si_normalized_class_il.png",
-)
-plot_accuracy_matrix(
-    task_il_matrix,
-    "Synaptic Intelligence Normalized (Task-IL)",
-    "plots/si_normalized_task_il.png",
-)

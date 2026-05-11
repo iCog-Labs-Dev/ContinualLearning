@@ -35,10 +35,9 @@ state = EWCState(
     cumulative_fisher=jax.tree.map(lambda p: jnp.zeros_like(p), params),
 )
 
-params, _, class_il_matrix, task_il_matrix = run_experiment(method, model, params, state, tasks)
+params, _, class_il_matrix, task_il_matrix = run_experiment(
+    method, model, params, state, tasks
+)
 
 print(f"\nAverage Class-IL Accuracy: {average_accuracy(class_il_matrix) * 100:.2f}%")
 print(f"Average Task-IL Accuracy: {average_accuracy(task_il_matrix) * 100:.2f}%")
-
-plot_accuracy_matrix(class_il_matrix, "Online EWC (Class-IL)", "plots/online_ewc_class_il.png")
-plot_accuracy_matrix(task_il_matrix, "Online EWC (Task-IL)", "plots/online_ewc_task_il.png")

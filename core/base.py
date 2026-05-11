@@ -9,6 +9,11 @@ class EWCState:
 
 
 @dataclass
+class EWCVanillaState:
+    anchors: list
+
+
+@dataclass
 class SIState:
     old_params: Any
     cumulative_omega: Any
