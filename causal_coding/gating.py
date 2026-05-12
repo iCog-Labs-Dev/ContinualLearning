@@ -39,21 +39,3 @@ def compute_gates(influence, p, kappa):
         gates[layer_key] = {"w": gate_w, "b": gate_b}
 
     return gates
-
-
-if __name__ == "__main__":
-    import sys
-
-    sys.path.append(".")
-    from core.model import MLP
-
-    key = jax.random.PRNGKey(0)
-    model = MLP([4, 8, 8, 3])
-    params = model.init_params(key)
-    batch_X = jax.random.normal(key, shape=(5, 4))
-    pre_acts, post_acts, logits = model.forward_with_states(params, batch_X)
-
-    influence = estimate_influence(params, pre_acts, batch_size=5)
-    gates = compute_gates(influence, p=1, kappa=1e-8)
-
-    print(gates)

@@ -26,23 +26,27 @@ def _gated_train_step(params, X, y, lr, p, kappa, model: MLP):
     influence = estimate_influence(params, pre_acts, batch_size=X.shape[0])
     gates = compute_gates(influence, p, kappa)
     gated_grads = {}
+    final_gates = []
 
     for layer_key in params:
         gate_w = gates[layer_key]["w"]
         gate_collapsed = jnp.mean(gate_w, axis=0)
-        gate_matrix = gate_collapsed[:, None]
+        gate_normalized = gate_collapsed / (jnp.mean(gate_collapsed) + 1e-8)
+        gate_final = jnp.minimum(gate_normalized, 1.0)
+        gate_matrix = gate_final[:, None]
 
         gated_grads[layer_key] = {
             "w": grads[layer_key]["w"] * gate_matrix,
             "b": grads[layer_key]["b"] * gates[layer_key]["b"],
         }
 
+        final_gates.append(jnp.ravel(gate_final))
+
     new_params = jax.tree.map(lambda param, g: param - lr * g, params, gated_grads)
-    w_arrays = [gates[k]["w"] for k in gates]
 
-    all_gates = jnp.concatenate([jnp.ravel(w) for w in w_arrays])
+    all_gates = jnp.concatenate(final_gates)
 
-    sparsity = jnp.mean(all_gates < 0.05)
+    sparsity = jnp.mean(all_gates < 0.5)
 
     return new_params, loss, sparsity
 
@@ -84,45 +88,3 @@ class CausalMethod:
         causal_state = CausalState(old_params=params, influence_scores=final_influence)
 
         return params, causal_state, total_loss / num_batches
-
-
-if __name__ == "__main__":
-    import sys
-
-    sys.path.append(".")
-    from core.model import MLP
-
-    key = jax.random.PRNGKey(0)
-    model = MLP([4, 8, 8, 3])
-    params = model.init_params(key)
-
-    key, subkey = jax.random.split(key)
-    batch_X = jax.random.normal(subkey, shape=(16, 4))
-    batch_y = jax.random.randint(key, shape=(16,), minval=0, maxval=3)
-
-    new_params, loss, sparsity = _gated_train_step(
-        params, batch_X, batch_y, lr=0.01, p=1.0, kappa=1e-8, model=model
-    )
-
-    print("loss:           ", loss)
-    print("sparsity:       ", sparsity)
-    print(
-        "params changed: ",
-        not jnp.allclose(params["layer_1"]["w"], new_params["layer_1"]["w"]),
-    )
-    print("no NaNs:        ", not jnp.any(jnp.isnan(new_params["layer_1"]["w"])))
-
-    task = Task(
-        train_X=jax.random.normal(key, shape=(64, 4)),
-        train_y=jax.random.randint(key, shape=(64,), minval=0, maxval=3),
-        test_X=jax.random.normal(key, shape=(20, 4)),
-        test_y=jax.random.randint(key, shape=(20,), minval=0, maxval=3),
-        classes=[0, 1, 2],
-    )
-
-    method = CausalMethod(lr=0.01, batch_size=16, epochs=3, p=1.0, kappa=1e-8)
-    params, causal_state, final_loss = method.train_task(model, params, None, task, 0)
-
-    print("CausalState type:      ", type(causal_state).__name__)
-    print("old_params has layer_1:", "layer_1" in causal_state.old_params)
-    print("influence_scores keys: ", list(causal_state.influence_scores.keys()))
