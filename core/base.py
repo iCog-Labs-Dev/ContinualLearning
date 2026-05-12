@@ -20,7 +20,7 @@ class SIState:
 
 
 @dataclass
-class CasualState:
+class CausalState:
     old_params: Any
     influence_scores: Any
 
