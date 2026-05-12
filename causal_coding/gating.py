@@ -27,6 +27,20 @@ def estimate_influence(params, pre_acts, batch_size):
     return influence
 
 
+def compute_gates(influence, p, kappa):
+    gates = {}
+    for layer_key, layer_influence in influence.items():
+        infl_w = layer_influence["w"]
+        numerator = infl_w**p
+        denominator = jnp.sum(numerator, axis=1, keepdims=True) + kappa
+        gate_w = numerator / denominator
+        gate_b = jnp.ones_like(layer_influence["b"])
+
+        gates[layer_key] = {"w": gate_w, "b": gate_b}
+
+    return gates
+
+
 if __name__ == "__main__":
     import sys
 
@@ -40,9 +54,6 @@ if __name__ == "__main__":
     pre_acts, post_acts, logits = model.forward_with_states(params, batch_X)
 
     influence = estimate_influence(params, pre_acts, batch_size=5)
-    print("layer_3 w shape:", influence["layer_3"]["w"].shape)  # expect(3, 8)
-    print("layer_3 b shape:", influence["layer_3"]["b"].shape)  # expect(3,)
-    print("layer_2 w shape:", influence["layer_2"]["w"].shape)  # expect(3, 8)
-    print("layer_2 b shape:", influence["layer_2"]["b"].shape)  # expect(3,)
-    print("layer_1 w shape:", influence["layer_1"]["w"].shape)  # expect(3, 8)
-    print("layer_1 b shape:", influence["layer_1"]["b"].shape)  # expect(3,)
+    gates = compute_gates(influence, p=1, kappa=1e-8)
+
+    print(gates)
