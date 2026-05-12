@@ -1,5 +1,11 @@
+import os
+import sys
 import jax
 import jax.numpy as jnp
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+from core.model import MLP
 
 
 def estimate_influence(params, pre_acts, batch_size):
@@ -39,3 +45,21 @@ def compute_gates(influence, p, kappa):
         gates[layer_key] = {"w": gate_w, "b": gate_b}
 
     return gates
+
+
+def extract_gate_vectors(params, probe_X, model: MLP, p, kappa):
+    pre_acts, _, _ = model.forward_with_states(params, probe_X)
+    influence = estimate_influence(params, pre_acts, batch_size=probe_X.shape[0])
+    gates = compute_gates(influence, p, kappa)
+
+    gate_vectors = {}
+
+    for layer_key in params:
+        gate_w = gates[layer_key]["w"]
+        gate_collapsed = jnp.mean(gate_w, axis=0)
+        gate_normalized = gate_collapsed / (jnp.mean(gate_collapsed) + 1e-8)
+        gate_final = jnp.minimum(gate_normalized, 1.0)
+
+        gate_vectors[layer_key] = gate_final
+
+    return gate_vectors

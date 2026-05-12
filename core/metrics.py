@@ -33,6 +33,17 @@ def backward_transfer(matrix):
     return bwt
 
 
+def forward_transfer(matrix, random_acc=0.5):
+    T = len(matrix)
+
+    fwt_sum = 0
+    for i in range(1, T):
+        fwt_sum += matrix[i - 1][i] - random_acc
+
+    fwt = fwt_sum / (T - 1)
+    return fwt
+
+
 def plot_accuracy_matrix(matrix, title, save_path):
     data = np.array(matrix)
     plt.figure(figsize=(8, 6))
