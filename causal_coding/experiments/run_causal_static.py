@@ -29,10 +29,18 @@ task = Task(
 params = model.init_params(key)
 state = CausalState(
     old_params=params,
-    influence_scores=jax.tree.map(lambda p: jnp.zeros_like(p), params),
+    influence_scores=None,
+    gate_vectors=None,
+    all_gate_vectors=[],
+    accumulated_support={},
+    seen_classes=[],
 )
 
-method = CausalMethod(lr=0.01, batch_size=128, epochs=25, p=2.0, kappa=1e-8)
+method = CausalMethod(
+    lr=0.01, batch_size=128, epochs=25, p=2.0, kappa=1e-8, lambda_clarity=0.0,
+    use_protection=False, gate_quantile=0.90, support_frac=0.15,
+    influence_mode="composite", use_head_protection=False,
+)
 cc_start = time.time()
 params, state, _ = method.train_task(model, params, state, task, task_idx=0)
 jax.tree_util.tree_map(lambda x: x.block_until_ready(), params)

@@ -23,6 +23,10 @@ class SIState:
 class CausalState:
     old_params: Any
     influence_scores: Any
+    gate_vectors: Any
+    all_gate_vectors: list
+    accumulated_support: Any
+    seen_classes: list
 
 
 class ContinualLearningMethod(Protocol):
