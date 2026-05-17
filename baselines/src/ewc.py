@@ -2,9 +2,10 @@ import jax
 import jax.numpy as jnp
 from functools import partial
 
-from .utils import cross_entropy, accuracy
-from .model import MLP
-from .data import Task
+from core.metrics import cross_entropy
+from core.model import MLP
+from core.data import Task
+from core.base import EWCState, EWCVanillaState
 from .naive import _train_step
 
 
@@ -17,14 +18,12 @@ def _ewc_loss_fn(params, X, y, anchors, lam, model):
     task_loss = _loss_fn(params, X, y, model)
     total_penality = 0.0
     for anchor in anchors:
-
         penality = jax.tree.map(
             lambda F, p, p_old: jnp.sum(F * (p - p_old) ** 2),
             anchor["fisher"],
             params,
             anchor["params"],
         )
-
         total_penality = total_penality + sum(jax.tree.leaves(penality))
     return task_loss + (lam / 2) * total_penality
 
@@ -95,12 +94,12 @@ class EWCMethod:
                     if self.decay < 1.0:
                         anchors = [
                             {
-                                "fisher": state["cumulative_fisher"],
-                                "params": state["old_params"],
+                                "fisher": state.cumulative_fisher,
+                                "params": state.old_params,
                             }
                         ]
                     else:
-                        anchors = state["anchors"]
+                        anchors = state.anchors
                     params, loss = _ewc_train_step(
                         params,
                         batch_X,
@@ -123,33 +122,26 @@ class EWCMethod:
             else:
                 new_cumulative_fisher = jax.tree.map(
                     lambda cf, nf: self.decay * cf + nf,
-                    state["cumulative_fisher"],
+                    state.cumulative_fisher,
                     new_fisher,
                 )
-
             new_old_params = jax.tree.map(
                 lambda old, new: self.anchor_alpha * old
                 + (1 - self.anchor_alpha) * new,
-                state["old_params"],
+                state.old_params,
                 params,
             )
-            new_state = {
-                "cumulative_fisher": new_cumulative_fisher,
-                "old_params": new_old_params,
-            }
+            return (
+                params,
+                EWCState(
+                    old_params=new_old_params, cumulative_fisher=new_cumulative_fisher
+                ),
+                total_loss / num_batch,
+            )
         else:
             new_anchor = {"fisher": new_fisher, "params": params}
-            new_state = {"anchors": state["anchors"] + [new_anchor]}
-
-        return params, new_state, total_loss / num_batch
-
-    def evaluate(self, model: MLP, params, task: Task, allowed_classes=None):
-        logits = model.forward(params, task.test_X)
-
-        if allowed_classes is not None:
-            mask = jnp.full((logits.shape[1],), -jnp.inf)
-            mask = mask.at[jnp.array(allowed_classes)].set(0.0)
-            logits = logits + mask
-
-        predictions = jnp.argmax(logits, axis=1)
-        return accuracy(predictions, task.test_y)
+            return (
+                params,
+                EWCVanillaState(anchors=state.anchors + [new_anchor]),
+                total_loss / num_batch,
+            )

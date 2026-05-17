@@ -1,6 +1,9 @@
 import jax
 import jax.numpy as jnp
-from .utils import he_init
+
+
+def he_init(key, fan_in, fan_out):
+    return jax.random.normal(key, shape=(fan_in, fan_out)) * jnp.sqrt(2 / fan_in)
 
 
 class MLP:
@@ -33,3 +36,21 @@ class MLP:
                 z = X @ W + b
 
         return z
+
+    def forward_with_states(self, params, X):
+        num_layers = len(params)
+        states = []
+        z = 0.0
+        for i in range(num_layers):
+            W = params[f"layer_{i + 1}"]["w"]
+            b = params[f"layer_{i + 1}"]["b"]
+
+            if i < num_layers - 1:
+                z = X @ W + b
+                X = jnp.maximum(0, z)
+                states.append(X)
+            else:
+                z = X @ W + b
+                states.append(z)
+
+        return states, z

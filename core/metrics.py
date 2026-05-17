@@ -5,10 +5,6 @@ import matplotlib.pyplot as plt
 import seaborn
 
 
-def he_init(key, fan_in, fan_out):
-    return jax.random.normal(key, shape=(fan_in, fan_out)) * jnp.sqrt(2 / fan_in)
-
-
 def cross_entropy(logits, labels):
     log_probs = jax.nn.log_softmax(logits)
     return -jnp.mean(log_probs[jnp.arange(labels.shape[0]), labels])
@@ -20,6 +16,21 @@ def accuracy(predictions, labels):
 
 def average_accuracy(matrix):
     return jnp.mean(jnp.array(matrix)[-1])
+
+
+def backward_transfer(matrix):
+    T = len(matrix)
+
+    bwt_sum = 0
+    for i in range(T - 1):
+        diagonal_value = matrix[i][i]
+        final_value = matrix[T - 1][i]
+
+        drop = final_value - diagonal_value
+        bwt_sum += drop
+
+    bwt = bwt_sum / (T - 1)
+    return bwt
 
 
 def plot_accuracy_matrix(matrix, title, save_path):
@@ -41,18 +52,3 @@ def plot_accuracy_matrix(matrix, title, save_path):
     plt.tight_layout()
     plt.savefig(save_path)
     plt.show()
-
-
-def backward_transfer(matrix):
-    T = len(matrix)
-
-    bwt_sum = 0
-    for i in range(T - 1):
-        diagonal_value = matrix[i][i]
-        final_value = matrix[T - 1][i]
-
-        drop = final_value - diagonal_value
-        bwt_sum += drop
-
-    bwt = bwt_sum / (T - 1)
-    return bwt

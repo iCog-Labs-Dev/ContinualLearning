@@ -1,9 +1,10 @@
 import jax
 import jax.numpy as jnp
 from functools import partial
-from .model import MLP
-from .utils import cross_entropy, accuracy
-from .data import Task
+from core.model import MLP
+from core.metrics import cross_entropy
+from core.data import Task
+from core.base import SIState
 
 
 def _loss_fn(params, X, y, model: MLP):
@@ -61,8 +62,8 @@ class SIMethod:
     def train_task(self, model, params, state, task: Task, task_idx):
         initial_params = params
         contribution_sum = jax.tree.map(lambda p: jnp.zeros_like(p), params)
-        old_params = state["old_params"]
-        cumulative_omega = state["cumulative_omega"]
+        old_params = state.old_params
+        cumulative_omega = state.cumulative_omega
 
         for ep in range(self.epochs):
             num_batch = task.train_X.shape[0] // self.batch_size
@@ -124,16 +125,4 @@ class SIMethod:
                 lambda c_o, o_n: self.decay * c_o + o_n, cumulative_omega, omega_new
             )
 
-        new_state = {"old_params": params, "cumulative_omega": new_cumulative_omega}
-        return params, new_state, total_loss / num_batch
-
-    def evaluate(self, model: MLP, params, task: Task, allowed_classes=None):
-        logits = model.forward(params, task.test_X)
-
-        if allowed_classes is not None:
-            mask = jnp.full((logits.shape[1],), -jnp.inf)
-            mask = mask.at[jnp.array(allowed_classes)].set(0.0)
-            logits = logits + mask
-
-        predictions = jnp.argmax(logits, axis=1)
-        return accuracy(predictions, task.test_y)
+        return params, SIState(old_params=params, cumulative_omega=new_cumulative_omega), total_loss / num_batch

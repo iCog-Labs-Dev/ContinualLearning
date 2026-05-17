@@ -1,9 +1,8 @@
 import jax
-import jax.numpy as jnp
 from functools import partial
-from .model import MLP
-from .utils import cross_entropy, accuracy
-from .data import Task
+from core.model import MLP
+from core.metrics import cross_entropy
+from core.data import Task
 
 
 def _loss_fn(params, X, y, model: MLP):
@@ -27,7 +26,7 @@ class NaiveMethod:
         self.batch_size = batch_size
         self.epochs = epochs
 
-    def train_task(self, model, params, task: Task):
+    def train_task(self, model, params, state, task: Task, task_idx):
         num_batch = task.train_X.shape[0] // self.batch_size
 
         for ep in range(self.epochs):
@@ -45,15 +44,4 @@ class NaiveMethod:
 
             print(f"Epoch: {ep + 1} ======== Loss: {total_loss / num_batch}")
 
-        return params, total_loss / num_batch
-
-    def evaluate(self, model: MLP, params, task: Task, allowed_classes=None):
-        logits = model.forward(params, task.test_X)
-
-        if allowed_classes is not None:
-            mask = jnp.full((logits.shape[1],), -jnp.inf)
-            mask = mask.at[jnp.array(allowed_classes)].set(0.0)
-            logits = logits + mask
-
-        predictions = jnp.argmax(logits, axis=1)
-        return accuracy(predictions, task.test_y)
+        return params, None, total_loss / num_batch
