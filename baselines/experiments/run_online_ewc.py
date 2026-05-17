@@ -8,7 +8,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 
 from core.model import MLP
 from core.data import load_mnist, split_into_tasks
-from core.metrics import average_accuracy, plot_accuracy_matrix
+from core.metrics import average_accuracy, backward_transfer, plot_accuracy_matrix
 from core.base import EWCState
 from core.runner import run_experiment
 from src.ewc import EWCMethod
@@ -41,3 +41,4 @@ params, _, class_il_matrix, task_il_matrix = run_experiment(
 
 print(f"\nAverage Class-IL Accuracy: {average_accuracy(class_il_matrix) * 100:.2f}%")
 print(f"Average Task-IL Accuracy: {average_accuracy(task_il_matrix) * 100:.2f}%")
+print(f"Backward Transfer (Class-IL): {backward_transfer(class_il_matrix) * 100:.2f}%")
