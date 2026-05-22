@@ -8,9 +8,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 
 from core.model import MLP
 from core.data import load_mnist, split_into_tasks
-from core.metrics import average_accuracy, backward_transfer, plot_accuracy_matrix
 from core.base import EWCState
 from core.runner import evaluate
+from benchmarker import benchmark
 from src.ewc_dr import EWCDRMethod
 
 X, y, test_X, test_y = load_mnist()
@@ -35,6 +35,9 @@ state = EWCState(
     old_params=params,
     cumulative_fisher=jax.tree.map(lambda p: jnp.zeros_like(p), params),
 )
+
+class_il_baselines = [evaluate(model, params, task) for task in tasks]
+task_il_baselines = [evaluate(model, params, task, task.classes) for task in tasks]
 
 ema_params = params
 class_il_matrix = []
@@ -67,6 +70,10 @@ for task_idx, task in enumerate(tasks):
             f"  Task {i + 1} -> Class-IL: {acc_cil * 100:.2f}% | Task-IL: {acc_til * 100:.2f}%"
         )
 
-print(f"\nAverage Class-IL Accuracy: {average_accuracy(class_il_matrix) * 100:.2f}%")
-print(f"Average Task-IL Accuracy: {average_accuracy(task_il_matrix) * 100:.2f}%")
-print(f"Backward Transfer (Class-IL): {backward_transfer(class_il_matrix) * 100:.2f}%")
+benchmark(
+    "ewc_with_ema",
+    class_il_matrix,
+    task_il_matrix,
+    class_il_baselines,
+    task_il_baselines,
+)

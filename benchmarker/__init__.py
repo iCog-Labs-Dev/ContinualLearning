@@ -3,19 +3,27 @@ from .logger import save_results
 from .plotter import plot_all
 
 
-def benchmark(method_name, class_il_matrix, task_il_matrix, baselines):
+def benchmark(
+    method_name,
+    class_il_matrix,
+    task_il_matrix,
+    class_il_baselines,
+    task_il_baselines,
+):
 
     metrics_dict = {
         "task_il": {
             "average_accuracy": float(average_accuracy(task_il_matrix)),
             "backward_transfer": float(backward_transfer(task_il_matrix)),
-            "forward_transfer": float(forward_transfer(task_il_matrix, baselines)),
+            "forward_transfer": float(forward_transfer(task_il_matrix, task_il_baselines)),
             "forgetting": float(forgetting(task_il_matrix)),
         },
         "class_il": {
             "average_accuracy": float(average_accuracy(class_il_matrix)),
             "backward_transfer": float(backward_transfer(class_il_matrix)),
-            "forward_transfer": float(forward_transfer(class_il_matrix, baselines)),
+            "forward_transfer": float(
+                forward_transfer(class_il_matrix, class_il_baselines)
+            ),
             "forgetting": float(forgetting(class_il_matrix)),
         },
     }

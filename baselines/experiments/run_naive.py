@@ -7,8 +7,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 
 from core.model import MLP
 from core.data import load_mnist, split_into_tasks
-from core.metrics import average_accuracy, backward_transfer, plot_accuracy_matrix
-from core.runner import run_experiment
+from core.runner import evaluate, run_experiment
+from benchmarker import benchmark
 from src.naive import NaiveMethod
 
 X, y, test_X, test_y = load_mnist()
@@ -21,10 +21,11 @@ params = model.init_params(key)
 
 method = NaiveMethod(lr=0.01, batch_size=128, epochs=25)
 
+class_il_baselines = [evaluate(model, params, task) for task in tasks]
+task_il_baselines = [evaluate(model, params, task, task.classes) for task in tasks]
+
 params, _, class_il_matrix, task_il_matrix = run_experiment(
     method, model, params, None, tasks
 )
 
-print(f"\nAverage Class-IL Accuracy: {average_accuracy(class_il_matrix) * 100:.2f}%")
-print(f"Average Task-IL Accuracy: {average_accuracy(task_il_matrix) * 100:.2f}%")
-print(f"Backward Transfer (Class-IL): {backward_transfer(class_il_matrix) * 100:.2f}%")
+benchmark("naive", class_il_matrix, task_il_matrix, class_il_baselines, task_il_baselines)
