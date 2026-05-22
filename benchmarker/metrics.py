@@ -38,7 +38,7 @@ def forgetting(matrix):
     frt_sum = 0
 
     for i in range(T - 1):
-        column_i = jnp.array(matrix[t][i] for t in range(i, T))
+        column_i = jnp.array([matrix[t][i] for t in range(i, T)])
         peak = jnp.max(column_i)
         final = matrix[T - 1][i]
 
