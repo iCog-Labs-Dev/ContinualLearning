@@ -68,8 +68,8 @@ def plot_forgetting(matrix, title, output_dir):
     plt.close()
 
 
-def plot_all(method_name, class_il_matrix, task_il_matrix, output_dir):
-    plots_dir = output_dir + "/plots"
+def plot_all(method_name, class_il_matrix, task_il_matrix):
+    plots_dir = "results/" + method_name + "/plots"
     os.makedirs(plots_dir, exist_ok=True)
 
     plot_accuracy_matrix(class_il_matrix, "class_il", plots_dir)
