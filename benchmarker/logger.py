@@ -3,9 +3,10 @@ import json
 import csv
 
 
-def _save_json(output_dir, method_name, metrics_dict):
+def _save_json(output_dir, method_name, metrics_dict, config=None):
     data = {
         "method": method_name,
+        "config": config or {},
         "protocol": {
             "task_il": metrics_dict["task_il"],
             "class_il": metrics_dict["class_il"],
@@ -33,11 +34,11 @@ def _save_matrix_csv(output_dir, matrix, filename):
             writer.writerow([row_label] + values)
 
 
-def save_results(method_name, metrics_dict, class_il_matrix, task_il_matrix):
+def save_results(method_name, metrics_dict, class_il_matrix, task_il_matrix, config=None):
     output_dir = "results/" + method_name
     os.makedirs(output_dir, exist_ok=True)
 
-    _save_json(output_dir, method_name, metrics_dict)
+    _save_json(output_dir, method_name, metrics_dict, config)
     _save_matrix_csv(output_dir, class_il_matrix, "class_il_matrix.csv")
     _save_matrix_csv(output_dir, task_il_matrix, "task_il_matrix.csv")
 

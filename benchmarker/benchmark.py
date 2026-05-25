@@ -55,7 +55,7 @@ class CLBenchmark:
         )
 
         results.summary()
-        save_results(self.name, metrics, class_il_matrix, task_il_matrix)
+        save_results(self.name, metrics, class_il_matrix, task_il_matrix, self.config)
         plot_all(self.name, class_il_matrix, task_il_matrix)
 
         return results
