@@ -9,8 +9,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 from core.model import MLP
 from core.data import load_mnist, split_into_tasks
 from core.base import SIState
-from core.runner import evaluate, run_experiment
-from benchmarker import benchmark
+from benchmarker import CLBenchmark
 from src.si import SIMethod
 
 X, y, test_X, test_y = load_mnist()
@@ -34,11 +33,4 @@ state = SIState(
     cumulative_omega=jax.tree.map(lambda p: jnp.zeros_like(p), params),
 )
 
-class_il_baselines = [evaluate(model, params, task) for task in tasks]
-task_il_baselines = [evaluate(model, params, task, task.classes) for task in tasks]
-
-params, _, class_il_matrix, task_il_matrix = run_experiment(
-    method, model, params, state, tasks
-)
-
-benchmark("si", class_il_matrix, task_il_matrix, class_il_baselines, task_il_baselines)
+CLBenchmark(method=method, model=model, tasks=tasks, name="si").run(params, state)
