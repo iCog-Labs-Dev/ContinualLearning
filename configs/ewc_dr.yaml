@@ -1,0 +1,7 @@
+method_kwargs:
+  lr: 0.001
+  lr_task1: 0.01
+  batch_size: 128
+  epochs: 25
+  lam: 100
+  num_samples: 200

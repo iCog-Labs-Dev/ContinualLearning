@@ -1,0 +1,4 @@
+method_kwargs:
+  lr: 0.01
+  batch_size: 128
+  epochs: 25
