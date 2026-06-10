@@ -45,3 +45,5 @@ tzdata==2026.1
 urllib3==2.6.3
 wheel==0.46.3
 wrapt==2.1.2
+pydantic>=2.0.0
+pyyaml>=6.0
