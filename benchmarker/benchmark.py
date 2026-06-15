@@ -22,6 +22,8 @@ class CLBenchmark:
 
         class_il_matrix = []
         task_il_matrix = []
+        class_il_nll_matrix = []
+        task_il_nll_matrix = []
 
         for task_idx, task in enumerate(self.tasks):
             print(f"\n--- Training Task {task_idx + 1} ---")
@@ -29,19 +31,30 @@ class CLBenchmark:
                 self.model, params, state, task, task_idx
             )
 
-            class_il_row, task_il_row = self._evaluator.evaluate_all(
-                self.model, params, self.tasks
+            class_il_row, task_il_row, class_il_nll_row, task_il_nll_row = (
+                self._evaluator.evaluate_all(self.model, params, self.tasks)
             )
             class_il_matrix.append(class_il_row)
             task_il_matrix.append(task_il_row)
+            class_il_nll_matrix.append(class_il_nll_row)
+            task_il_nll_matrix.append(task_il_nll_row)
 
-            for i, (cil, til) in enumerate(zip(class_il_row, task_il_row)):
+            for i, (cil, til, cil_nll, til_nll) in enumerate(
+                zip(class_il_row, task_il_row, class_il_nll_row, task_il_nll_row)
+            ):
                 print(
-                    f"  Task {i + 1} -> Class-IL: {cil * 100:.2f}% | Task-IL: {til * 100:.2f}%"
+                    f"  Task {i + 1} -> "
+                    f"Class-IL: {cil * 100:.2f}% (NLL {cil_nll:.3f}) | "
+                    f"Task-IL: {til * 100:.2f}% (NLL {til_nll:.3f})"
                 )
 
         metrics = self._compute_metrics(
-            class_il_matrix, task_il_matrix, class_il_baselines, task_il_baselines
+            class_il_matrix,
+            task_il_matrix,
+            class_il_nll_matrix,
+            task_il_nll_matrix,
+            class_il_baselines,
+            task_il_baselines,
         )
 
         results = BenchmarkResults(
@@ -61,11 +74,18 @@ class CLBenchmark:
         return results
 
     def _compute_metrics(
-        self, class_il_matrix, task_il_matrix, class_il_baselines, task_il_baselines
+        self,
+        class_il_matrix,
+        task_il_matrix,
+        class_il_nll_matrix,
+        task_il_nll_matrix,
+        class_il_baselines,
+        task_il_baselines,
     ) -> dict:
         return {
             "task_il": {
                 "average_accuracy": float(average_accuracy(task_il_matrix)),
+                "average_nll": float(average_accuracy(task_il_nll_matrix)),
                 "backward_transfer": float(backward_transfer(task_il_matrix)),
                 "forward_transfer": float(
                     forward_transfer(task_il_matrix, task_il_baselines)
@@ -74,6 +94,7 @@ class CLBenchmark:
             },
             "class_il": {
                 "average_accuracy": float(average_accuracy(class_il_matrix)),
+                "average_nll": float(average_accuracy(class_il_nll_matrix)),
                 "backward_transfer": float(backward_transfer(class_il_matrix)),
                 "forward_transfer": float(
                     forward_transfer(class_il_matrix, class_il_baselines)
