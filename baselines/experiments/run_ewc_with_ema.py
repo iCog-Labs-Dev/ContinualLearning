@@ -87,5 +87,5 @@ til, cil = metrics["task_il"], metrics["class_il"]
 print(f"Task-IL  | ACC: {til['average_accuracy']:.4f} | BWT: {til['backward_transfer']:.4f} | FWT: {til['forward_transfer']:.4f} | Forgetting: {til['forgetting']:.4f}")
 print(f"Class-IL | ACC: {cil['average_accuracy']:.4f} | BWT: {cil['backward_transfer']:.4f} | FWT: {cil['forward_transfer']:.4f} | Forgetting: {cil['forgetting']:.4f}")
 
-save_results("ewc_with_ema", metrics, class_il_matrix, task_il_matrix)
+save_results("ewc_with_ema", metrics, class_il_matrix, task_il_matrix, config=vars(method))
 plot_all("ewc_with_ema", class_il_matrix, task_il_matrix)
