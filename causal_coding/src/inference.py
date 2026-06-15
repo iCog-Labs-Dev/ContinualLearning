@@ -11,7 +11,7 @@ def compute_errors(weights, xs):
         prediction = weights[l - 1] @ relu(xs[l - 1])
         if l == num_layers - 1:
             probs = jax.nn.softmax(prediction, axis=0)
-            error = xs[1] - probs
+            error = xs[l] - probs
         else:
             error = xs[l] - prediction
         errors.append(error)
