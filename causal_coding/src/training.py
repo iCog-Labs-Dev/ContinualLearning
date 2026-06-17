@@ -63,7 +63,7 @@ def train_step(
 
     new_lateral_S = []
 
-    for l in range(num_layers - 2):
+    for l in range(len(lateral_S_list)):
         x_eq = xs[l + 1]
         sx = lateral_S_list[l] @ x_eq
         delta_s = (1.0 / batch_size) * (sx @ x_eq.T)

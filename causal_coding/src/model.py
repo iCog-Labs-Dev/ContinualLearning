@@ -25,7 +25,7 @@ class CausalCodingModel:
             jnp.zeros(self.layer_sizes[l]) for l in range(1, self.num_layers)
         ]
 
-        num_laterals = self.num_layers - 2
+        num_laterals = self.num_layers - 1
 
         if num_laterals > 0:
             lateral_keys = jax.random.split(key_l, num_laterals)

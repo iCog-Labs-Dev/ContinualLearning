@@ -20,16 +20,16 @@ params = model.init_params(key)
 
 method = CausalCodingMethod(
     lr_z=0.01,
-    lr_w=0.005,
+    lr_w=0.001,
     lr_pi=0.0001,
     lr_lat=0.0001,
-    num_inference_steps=20,
+    num_inference_steps=25,
     gate_p=2.0,
     gate_kappa=1e-3,
     ridge=1e-4,
     lambda_s=1e-6,
-    batch_size=64,
-    epochs=10,
+    batch_size=128,
+    epochs=25,
 )
 
 CLBenchmark(method=method, model=model, tasks=tasks, name="causal_coding").run(

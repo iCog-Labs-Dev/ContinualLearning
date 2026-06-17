@@ -32,6 +32,9 @@ def compute_local_maps(precisions, laterals, jacobians, ridge=1e-4):
         return H
 
     G_bar_next = jnp.diag(precisions[L - 1])
+    out_lateral = get_lateral(L)
+    if out_lateral is not None:
+        G_bar_next = G_bar_next + out_lateral
 
     A_tildes = [None] * L
     for l in range(L - 1, -1, -1):
