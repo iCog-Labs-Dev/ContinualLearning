@@ -10,27 +10,24 @@ from core.model import MLP
 from core.data import load_mnist, split_into_tasks
 from core.metrics import average_accuracy, backward_transfer, plot_accuracy_matrix
 from core.base import EWCState
-from core.runner import evaluate
-from src.ewc_dr import EWCDRMethod
+from core.config import get_config
+from core.runner import run_experiment
+from src.ewc_with_ema import EWCEMAMethod
 
 X, y, test_X, test_y = load_mnist()
-class_pairs = [[0, 1], [2, 3], [4, 5], [6, 7], [8, 9]]
-tasks = split_into_tasks(X, y, test_X, test_y, class_pairs)
+# Load hyperparameters from YAML or fallback to defaults
+config = get_config(
+    default_method_kwargs=dict(lr=0.001, batch_size=128, epochs=50)
+)
+tasks = split_into_tasks(X, y, test_X, test_y, config.task.class_pairs)
 
-model = MLP([784, 512, 512, 10])
+# Initialize model using config dimensions
+model = MLP([config.model.input_dim] + config.model.hidden_dims + [config.model.output_dim])
 key = jax.random.PRNGKey(0)
 params = model.init_params(key)
 
-method = EWCDRMethod(
-    lr=0.001,
-    lr_task1=0.01,
-    batch_size=128,
-    epochs=50,
-    lam=1000,
-    num_samples=200,
-    decay=0.9,
-    anchor_alpha=0.5,
-)
+# Inject kwargs directly into the method
+method = EWCEMAMethod(**config.method_kwargs)
 state = EWCState(
     old_params=params,
     cumulative_fisher=jax.tree.map(lambda p: jnp.zeros_like(p), params),
