@@ -16,6 +16,7 @@ class CausalCodingMethod:
         gate_kappa,
         ridge,
         lambda_s,
+        rho_clarity,
         batch_size,
         epochs,
     ):
@@ -28,6 +29,7 @@ class CausalCodingMethod:
         self.gate_kappa = gate_kappa
         self.ridge = ridge
         self.lambda_s = lambda_s
+        self.rho_clarity = rho_clarity
         self.batch_size = batch_size
         self.epochs = epochs
 
@@ -57,6 +59,7 @@ class CausalCodingMethod:
                     self.gate_kappa,
                     self.ridge,
                     self.lambda_s,
+                    self.rho_clarity,
                 )
                 total_loss += loss
 

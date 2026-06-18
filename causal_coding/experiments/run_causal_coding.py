@@ -20,14 +20,15 @@ params = model.init_params(key)
 
 method = CausalCodingMethod(
     lr_z=0.01,
-    lr_w=0.001,
+    lr_w=0.2,
     lr_pi=0.0001,
-    lr_lat=0.0001,
+    lr_lat=0.001,
     num_inference_steps=25,
     gate_p=2.0,
     gate_kappa=1e-3,
     ridge=1e-4,
     lambda_s=1e-6,
+    rho_clarity=5e-3,
     batch_size=128,
     epochs=25,
 )
