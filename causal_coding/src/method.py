@@ -10,26 +10,22 @@ class CausalCodingMethod:
         lr_z,
         lr_w,
         lr_pi,
-        lr_lat,
         num_inference_steps,
         gate_p,
         gate_kappa,
         ridge,
         lambda_s,
-        rho_clarity,
         batch_size,
         epochs,
     ):
         self.lr_z = lr_z
         self.lr_w = lr_w
         self.lr_pi = lr_pi
-        self.lr_lat = lr_lat
         self.num_inference_steps = num_inference_steps
         self.gate_p = gate_p
         self.gate_kappa = gate_kappa
         self.ridge = ridge
         self.lambda_s = lambda_s
-        self.rho_clarity = rho_clarity
         self.batch_size = batch_size
         self.epochs = epochs
 
@@ -54,12 +50,10 @@ class CausalCodingMethod:
                     self.lr_z,
                     self.lr_w,
                     self.lr_pi,
-                    self.lr_lat,
                     self.gate_p,
                     self.gate_kappa,
                     self.ridge,
                     self.lambda_s,
-                    self.rho_clarity,
                 )
                 total_loss += loss
 

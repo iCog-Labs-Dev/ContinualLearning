@@ -16,12 +16,10 @@ def train_step(
     lr_z,
     lr_w,
     lr_pi,
-    lr_lat,
     gate_p,
     gate_kappa,
     ridge,
     lambda_s,
-    rho_clarity,
 ):
     weights = params["weights"]
     log_precisions = params["log_precisions"]
@@ -61,31 +59,10 @@ def train_step(
         dw = 0.5 * (1.0 - pi * mse)
         updated = log_precisions[l] + lr_pi * dw
         new_log_precisions.append(jnp.clip(updated, -4.0, 4.0))
-
-    new_lateral_S = []
-    num_lat = len(lateral_S_list)
-    for l in range(num_lat):
-        S = lateral_S_list[l]
-        if l == num_lat - 1:
-
-            new_lateral_S.append(S)
-            continue
-        x_eq = xs[l + 1]
-        I_n = jnp.eye(S.shape[0])
-        u = S @ x_eq
-        Cu = (1.0 / batch_size) * (u @ u.T)
-        eps_whiten = 1e-2
-        Cu = Cu + eps_whiten * (S @ S.T)
-        whiten = (I_n - Cu) @ S
-        Lam = S.T @ S
-        offdiag = jnp.sign(Lam) * (1.0 - I_n)
-        clarity = 2.0 * (S @ offdiag)
-        new_lateral_S.append(S + lr_lat * whiten - lr_lat * rho_clarity * clarity)
-
     new_params = {
         "weights": new_weights,
         "log_precisions": new_log_precisions,
-        "lateral_S": new_lateral_S,
+        "lateral_S": lateral_S_list,
     }
 
     prediction = new_weights[-1] @ relu(xs[-2])
