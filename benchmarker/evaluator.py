@@ -1,5 +1,7 @@
 import jax.numpy as jnp
 
+from core.metrics import class_il_predict, task_il_predict
+
 
 class Evaluator:
 
@@ -7,11 +9,10 @@ class Evaluator:
         logits = model.forward(params, task.test_X)
 
         if allowed_classes is not None:
-            mask = jnp.full((logits.shape[1],), -jnp.inf)
-            mask = mask.at[jnp.array(allowed_classes)].set(0.0)
-            logits = logits + mask
+            predictions = task_il_predict(logits, allowed_classes)
+        else:
+            predictions = class_il_predict(logits)
 
-        predictions = jnp.argmax(logits, axis=1)
         return float(jnp.mean(predictions == task.test_y))
 
     def compute_baselines(self, model, params, tasks):

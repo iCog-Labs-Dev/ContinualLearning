@@ -2,6 +2,7 @@ import jax
 import jax.numpy as jnp
 from core.model import MLP
 from core.data import Task
+from core.metrics import log_likelihood
 from .ewc import EWCMethod
 
 
@@ -24,9 +25,12 @@ class EWCDRMethod(EWCMethod):
     def compute_fisher(self, model: MLP, params, task: Task):
         X = task.train_X[: self.num_samples]
         y = task.train_y[: self.num_samples]
+        active_classes = tuple(task.classes) if self.task_il_training else None
 
         def single_log_likelihood(params, x, y):
             logits = model.forward(params, x)
+            if active_classes is not None:
+                return log_likelihood(logits, y, active_classes)
             log_probs = jax.nn.log_softmax(-logits)
             return log_probs[y]
 
