@@ -12,12 +12,12 @@ from core.metrics import average_accuracy, backward_transfer, plot_accuracy_matr
 from core.base import EWCState
 from core.config import get_config
 from core.runner import run_experiment
-from src.online_ewc import OnlineEWCMethod
+from src.ewc import EWCMethod
 
 X, y, test_X, test_y = load_mnist()
 # Load hyperparameters from YAML or fallback to defaults
 config = get_config(
-    default_method_kwargs=dict(lr=0.001, batch_size=128, epochs=25)
+    default_method_kwargs=dict(lr=0.001, lr_task1=0.01, batch_size=128, epochs=25, lam=10000, num_samples=300, decay=0.9)
 )
 tasks = split_into_tasks(X, y, test_X, test_y, config.task.class_pairs)
 
@@ -27,7 +27,7 @@ key = jax.random.PRNGKey(0)
 params = model.init_params(key)
 
 # Inject kwargs directly into the method
-method = OnlineEWCMethod(**config.method_kwargs)
+method = EWCMethod(**config.method_kwargs)
 state = EWCState(
     old_params=params,
     cumulative_fisher=jax.tree.map(lambda p: jnp.zeros_like(p), params),

@@ -15,10 +15,14 @@ from core.runner import run_experiment
 from src.ewc_dr import EWCDRMethod
 
 X, y, test_X, test_y = load_mnist()
+
 # Load hyperparameters from YAML or fallback to defaults
 config = get_config(
     default_method_kwargs=dict(lr=0.001, lr_task1=0.01, batch_size=128, epochs=25, lam=100, num_samples=200)
 )
+
+# print(f"Loaded config: {config.model_dump()}")
+
 tasks = split_into_tasks(X, y, test_X, test_y, config.task.class_pairs)
 
 # Initialize model using config dimensions

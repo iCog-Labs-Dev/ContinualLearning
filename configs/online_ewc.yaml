@@ -1,4 +1,8 @@
 method_kwargs:
   lr: 0.001
+  lr_task1: 0.01
   batch_size: 128
   epochs: 25
+  lam: 10000
+  num_samples: 300
+  decay: 0.9
