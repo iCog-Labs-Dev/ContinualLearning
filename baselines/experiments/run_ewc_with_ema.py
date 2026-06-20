@@ -17,6 +17,7 @@ from benchmarker.plotter import plot_all
 from src.ewc_dr import EWCDRMethod
 
 X, y, test_X, test_y = load_mnist()
+
 # Load hyperparameters from YAML or fallback to defaults
 config = get_config(
     default_method_kwargs=dict(lr=0.001, lr_task1=0.01, batch_size=128, epochs=50, lam=1000, num_samples=200, decay=0.9, anchor_alpha=0.5)
