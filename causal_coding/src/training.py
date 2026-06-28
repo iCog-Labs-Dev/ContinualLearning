@@ -49,6 +49,9 @@ def train_step(
     adam_beta2_lat,
     adam_eps_lat,
     grad_clip_norm_lat,
+    lambda_d,
+    clarity_t,
+    clarity_eps,
 ):
     weights = params["weights"]
     log_precisions = params["log_precisions"]
@@ -143,6 +146,9 @@ def train_step(
             eps_lat,
             lambda_fro,
             lambda_U,
+            lambda_d,
+            clarity_t,
+            clarity_eps,
         )
 
     grad_Us, grad_rhos = jax.grad(lateral_loss_fn, argnums=(0, 1))(

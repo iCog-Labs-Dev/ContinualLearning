@@ -40,6 +40,11 @@ class CausalCodingMethod:
         adam_beta2_lat=0.999,
         adam_eps_lat=1e-8,
         grad_clip_norm_lat=1.0,
+
+        # Diffusion clarity penalty.
+        lambda_d=0.0,
+        clarity_t=1.0,
+        clarity_eps=1e-4,
     ):
         self.lr_z = lr_z
         self.lr_w = lr_w
@@ -76,6 +81,11 @@ class CausalCodingMethod:
         self.adam_beta2_lat = adam_beta2_lat
         self.adam_eps_lat = adam_eps_lat
         self.grad_clip_norm_lat = grad_clip_norm_lat
+
+        # Diffusion clarity penalty.
+        self.lambda_d = lambda_d
+        self.clarity_t = clarity_t
+        self.clarity_eps = clarity_eps
 
     def train_task(self, model, params, state, task: Task, task_idx, diagnostics_hook=None):
         num_classes = model.layer_sizes[-1]
@@ -137,6 +147,9 @@ class CausalCodingMethod:
                     self.adam_beta2_lat,
                     self.adam_eps_lat,
                     self.grad_clip_norm_lat,
+                    self.lambda_d,
+                    self.clarity_t,
+                    self.clarity_eps,
                 )
                 total_loss += loss
 

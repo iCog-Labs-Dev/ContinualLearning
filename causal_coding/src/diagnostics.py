@@ -9,6 +9,14 @@ from causal_coding.src.do_influence import (
     compute_causal_gates,
     compute_output_fisher,
 )
+from causal_coding.src.lateral import (
+    diffusion_clarity_kernel,
+    materialize_lateral,
+)
+
+# Default diffusion-clarity diagnostic parameters.
+CLARITY_T_DEFAULT = 1.0
+CLARITY_EPS_DEFAULT = 1e-4
 
 
 def _f(x):
@@ -262,6 +270,71 @@ def equilibrium_vs_feedforward_gap(model, params, method, X, y):
     return {"layers": layers}
 
 
+def lateral_clarity_stats(
+    lateral_U_list, lateral_log_alpha_list,
+    t=CLARITY_T_DEFAULT, eps=CLARITY_EPS_DEFAULT,
+):
+    """
+    heat-kernel diagnostic (VLCP).
+
+    For each hidden layer with Λ_l = softplus(ρ_l) · U_l U_lᵀ, build
+    the unnormalised graph Laplacian L = D − |Λ| (diagonal of |Λ|
+    included), form the heat kernel K_t = exp(−t · L), and
+    report scalar summaries of the candidate penalty integrand
+    `(K_t − |Λ| − ε)_+` restricted to off-diagonal entries (u ≠ v).
+
+    Pure diagnostic — does not enter the training path.
+    """
+    layers = []
+    for U, rho in zip(lateral_U_list, lateral_log_alpha_list):
+        raw_alpha = jax.nn.softplus(rho)
+        K_t = diffusion_clarity_kernel(U, raw_alpha, t)
+        abs_Lam = jnp.abs(materialize_lateral(U, raw_alpha))
+        raw_gap = K_t - abs_Lam
+
+        d = U.shape[0]
+        offdiag_mask = 1.0 - jnp.eye(d)
+        n_offdiag = float(d * (d - 1))
+
+        K_t_fro = jnp.linalg.norm(K_t)
+        K_t_offdiag_sum_abs = jnp.sum(jnp.abs(K_t) * offdiag_mask)
+        K_t_offdiag_mean_abs = K_t_offdiag_sum_abs / n_offdiag
+
+        # Signed off-diagonal gap statistics.
+        raw_gap_offdiag = raw_gap * offdiag_mask
+        raw_gap_offdiag_mean = jnp.sum(raw_gap_offdiag) / n_offdiag
+        # Mask diagonal to a very negative value before taking the max so
+        # off-diagonal entries always win the argmax.
+        raw_gap_max = jnp.max(raw_gap - 1e12 * jnp.eye(d))
+
+        # Penalty integrand: (K_t − |Λ| − ε)_+ restricted to u ≠ v.
+        penalty_pos = jax.nn.relu(raw_gap - eps) * offdiag_mask
+        penalty_value = jnp.sum(penalty_pos)
+        active_mask = (penalty_pos > 0.0).astype(jnp.float32)
+        penalty_active_count = jnp.sum(active_mask)
+        penalty_active_frac = penalty_active_count / n_offdiag
+        penalty_mean_active = jnp.where(
+            penalty_active_count > 0,
+            penalty_value / jnp.maximum(penalty_active_count, 1.0),
+            jnp.asarray(0.0),
+        )
+
+        layers.append({
+            "t": float(t),
+            "eps": float(eps),
+            "K_t_fro": _f(K_t_fro),
+            "K_t_offdiag_mean_abs": _f(K_t_offdiag_mean_abs),
+            "raw_gap_offdiag_mean": _f(raw_gap_offdiag_mean),
+            "raw_gap_offdiag_max": _f(raw_gap_max),
+            "penalty_value": _f(penalty_value),
+            "penalty_active_count": int(_f(penalty_active_count)),
+            "penalty_active_frac": _f(penalty_active_frac),
+            "penalty_mean_active": _f(penalty_mean_active),
+        })
+
+    return {"layers": layers, "t": float(t), "eps": float(eps)}
+
+
 def lateral_stats(
     weights, xs_eq, errors, precisions,
     lateral_U_list, lateral_log_alpha_list, lateral_cov_ema_list,
@@ -412,6 +485,17 @@ def run_full_diagnostics(
         jacobians,
     )
 
+    # Diffusion-clarity diagnostic 
+    clarity_t_used = float(getattr(method, "clarity_t", CLARITY_T_DEFAULT))
+    clarity_eps_used = float(getattr(method, "clarity_eps", CLARITY_EPS_DEFAULT))
+    if lateral_U_list:
+        clarity_diag = lateral_clarity_stats(
+            lateral_U_list, lateral_log_alpha_list,
+            t=clarity_t_used, eps=clarity_eps_used,
+        )
+    else:
+        clarity_diag = {"layers": [], "t": clarity_t_used, "eps": clarity_eps_used}
+
     out = {
         "label": label,
         "inference": inf_diag,
@@ -420,6 +504,7 @@ def run_full_diagnostics(
         "weight_update": wu_diag,
         "precision": pi_diag,
         "lateral": lat_diag,
+        "lateral_clarity": clarity_diag,
         "performance": perf_diag,
     }
 
@@ -507,6 +592,17 @@ def pprint_diag_summary(diag, header=None):
                 f"|off|={x['cov_ema_offdiag_mean_abs']:.2e}"
             )
         print(f"  Cov EMA:       {'   '.join(cov_parts)}")
+
+    clarity = diag.get("lateral_clarity", {}).get("layers", [])
+    if clarity:
+        clarity_parts = []
+        for l, x in enumerate(clarity):
+            clarity_parts.append(
+                f"L{l} active={x['penalty_active_count']} "
+                f"({x['penalty_active_frac'] * 100:.1f}%) "
+                f"pen={x['penalty_value']:.2e}"
+            )
+        print(f"  Lat clarity:   {'   '.join(clarity_parts)}")
 
     pc = p["per_class_test_acc"]
     pc_str = " ".join(f"{a * 100:5.1f}" for a in pc)

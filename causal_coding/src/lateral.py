@@ -21,6 +21,7 @@ semidefinite while avoiding dense lateral matvecs during inference.
 
 import jax
 import jax.numpy as jnp
+import jax.scipy.linalg
 
 
 # Schedule / parametrisation helpers
@@ -64,6 +65,71 @@ def materialize_lateral(U, alpha):
     return alpha * (U @ U.T)
 
 
+# Diffusion clarity helpers.
+
+def diffusion_clarity_kernel(U, alpha, t):
+    """Heat-kernel diffusion on the lateral graph at time t.
+
+    For one hidden layer's lateral matrix Λ = α · U Uᵀ, build the
+    unnormalised graph Laplacian L = D − W with W = |Λ| (diagonal of
+    |Λ| included per VLCP §4) and D = diag(rowsum(W)). Return the heat
+    kernel K_t = exp(−t · L) via `jax.scipy.linalg.expm`.
+
+    `K_t[v, u]` measures the diffused influence from neuron u to neuron
+    v through all paths in the layer. Used to identify direct edges
+    that are reproducible by multi-hop indirect paths.
+
+    Pure function; differentiable through both `expm` and the |Λ|
+    construction.
+    """
+    Lam = materialize_lateral(U, alpha)
+    W = jnp.abs(Lam)
+    D = jnp.diag(jnp.sum(W, axis=1))
+    L = D - W
+    return jax.scipy.linalg.expm(-t * L)
+
+
+def clarity_gap(U, alpha, t):
+    """Per-edge clarity gap K_t − |Λ|, plus supporting matrices.
+
+    Returns the tuple `(raw_gap, K_t, abs_Lam)` where:
+        K_t     = exp(−t · L)            (heat kernel)
+        abs_Lam = |α · U Uᵀ|             (direct-edge magnitudes)
+        raw_gap = K_t − abs_Lam          (signed; positive = indirect > direct)
+
+    The VLCP penalty integrand is `(raw_gap − ε)_+` summed over
+    off-diagonal entries; callers apply ε and the u ≠ v mask.
+    """
+    K_t = diffusion_clarity_kernel(U, alpha, t)
+    abs_Lam = jnp.abs(materialize_lateral(U, alpha))
+    return K_t - abs_Lam, K_t, abs_Lam
+
+
+def lateral_clarity_loss(U, alpha_eff, t, eps):
+    """VLCP diffusion clarity penalty for one hidden layer (scalar).
+
+        L_diff = Σ_{u≠v} ( K_t[v,u] − |Λ[v,u]| − ε )_+
+
+    with Λ = α_eff · U Uᵀ (i.e. ramp-multiplied, so the term self-gates
+    to zero during lateral warmup: at `ramp = 0` ⇒ `alpha_eff = 0` ⇒
+    `|Λ| = 0` ⇒ `L = 0` ⇒ `K_t = I` ⇒ off-diagonal penalty = 0).
+
+    The `u ≠ v` restriction in VLCP §4 is enforced by masking the
+    diagonal of the relu output; the diagonal of `|Λ|` IS included in
+    `W` when forming the Laplacian (per writeup), which is handled
+    inside `diffusion_clarity_kernel`.
+
+    Returns the scalar to be multiplied by `λ_d` in
+    `lateral_loss_one_layer`. Differentiable through `expm` and the
+    `|Λ|` construction.
+    """
+    raw_gap, _K_t, _abs_Lam = clarity_gap(U, alpha_eff, t)
+    gap = raw_gap - eps
+    d = U.shape[0]
+    offdiag = 1.0 - jnp.eye(d)
+    return jnp.sum(jax.nn.relu(gap) * offdiag)
+
+
 # Lateral learning objective
 def lateral_loss_one_layer(
     U,
@@ -74,6 +140,9 @@ def lateral_loss_one_layer(
     eps_lat,
     lambda_fro,
     lambda_U,
+    lambda_d=0.0,
+    clarity_t=1.0,
+    clarity_eps=1e-4,
 ):
     """Covariance-to-precision objective for one hidden layer.
 
@@ -81,13 +150,15 @@ def lateral_loss_one_layer(
             − β_logdet · log det(Λ + ε_lat · I)
             + λ_fro · ||Λ||_F²
             + λ_U · ||U||_F²
+            + λ_d · Σ_{u≠v} ( K_t[v,u] − |Λ[v,u]| − ε )_+   (VLCP §4)
 
     with Λ = ramp · softplus(ρ) · U Uᵀ. Uses the matrix-determinant lemma
     `log det(εI + α U Uᵀ) = d·log(ε) + log det(I_r + (α/ε) Uᵀ U)`; the
     `d·log(ε)` constant is dropped from the loss (no gradient).
 
     `C_ema` is expected to be stop_gradient-wrapped by the caller.
-    Returns a scalar.
+    Returns a scalar. With `lambda_d = 0`, the clarity term has no
+    semantic effect and preserves the pre-Phase-6a lateral objective.
     """
     raw_alpha = jax.nn.softplus(rho)
     alpha_eff = ramp * raw_alpha
@@ -108,7 +179,15 @@ def lateral_loss_one_layer(
     # Direct U L2 decay
     U_l2_term = lambda_U * jnp.sum(U ** 2)
 
-    return trace_term - beta_logdet * logdet + frob_term + U_l2_term
+    # VLCP §4 diffusion clarity penalty. Self-gated to zero during
+    # warmup via alpha_eff = ramp · raw_alpha.
+    clarity_term = lambda_d * lateral_clarity_loss(
+        U, alpha_eff, clarity_t, clarity_eps
+    )
+
+    return (
+        trace_term - beta_logdet * logdet + frob_term + U_l2_term + clarity_term
+    )
 
 
 def total_lateral_loss(
@@ -120,16 +199,21 @@ def total_lateral_loss(
     eps_lat,
     lambda_fro,
     lambda_U,
+    lambda_d=0.0,
+    clarity_t=1.0,
+    clarity_eps=1e-4,
 ):
     """Sum of per-layer lateral losses across hidden layers.
 
     `Us`, `rhos`, `C_emas` are parallel lists (length = num_hidden).
-    Returns a scalar suitable for `jax.grad`.
+    Returns a scalar suitable for `jax.grad`. Defaults for the VLCP
+    §4 clarity kwargs reproduce the pre-Phase-6a behaviour.
     """
     total = jnp.array(0.0)
     for U, rho, C in zip(Us, rhos, C_emas):
         total = total + lateral_loss_one_layer(
-            U, rho, C, ramp, beta_logdet, eps_lat, lambda_fro, lambda_U
+            U, rho, C, ramp, beta_logdet, eps_lat, lambda_fro, lambda_U,
+            lambda_d, clarity_t, clarity_eps,
         )
     return total
 
