@@ -2,20 +2,20 @@ import jax
 import jax.numpy as jnp
 from functools import partial
 
-from core.metrics import cross_entropy
+from core.metrics import compute_loss, log_likelihood
 from core.model import MLP
 from core.data import Task
 from core.base import EWCState, EWCVanillaState
 from .naive import _train_step
 
 
-def _loss_fn(params, X, y, model: MLP):
+def _loss_fn(params, X, y, model: MLP, active_classes=None):
     logits = model.forward(params, X)
-    return cross_entropy(logits, y)
+    return compute_loss(logits, y, active_classes)
 
 
-def _ewc_loss_fn(params, X, y, anchors, lam, model):
-    task_loss = _loss_fn(params, X, y, model)
+def _ewc_loss_fn(params, X, y, anchors, lam, model, active_classes=None):
+    task_loss = _loss_fn(params, X, y, model, active_classes)
     total_penality = 0.0
     for anchor in anchors:
         penality = jax.tree.map(
@@ -28,9 +28,11 @@ def _ewc_loss_fn(params, X, y, anchors, lam, model):
     return task_loss + (lam / 2) * total_penality
 
 
-@partial(jax.jit, static_argnums=(6,))
-def _ewc_train_step(params, X, y, anchors, lam, lr, model):
-    loss, grad = jax.value_and_grad(_ewc_loss_fn)(params, X, y, anchors, lam, model)
+@partial(jax.jit, static_argnums=(6, 7))
+def _ewc_train_step(params, X, y, anchors, lam, lr, model, active_classes=None):
+    loss, grad = jax.value_and_grad(_ewc_loss_fn)(
+        params, X, y, anchors, lam, model, active_classes
+    )
 
     new_params = jax.tree.map(
         lambda params, gradiant: params - lr * gradiant, params, grad
@@ -59,15 +61,16 @@ class EWCMethod:
         self.num_samples = num_samples
         self.decay = decay
         self.anchor_alpha = anchor_alpha
+        self.task_il_training = False
 
     def compute_fisher(self, model: MLP, params, task: Task):
         X = task.train_X[: self.num_samples]
         y = task.train_y[: self.num_samples]
+        active_classes = tuple(task.classes) if self.task_il_training else None
 
         def single_log_likelihood(params, x, y):
             logits = model.forward(params, x)
-            log_probs = jax.nn.log_softmax(logits)
-            return log_probs[y]
+            return log_likelihood(logits, y, active_classes)
 
         grad_fn = jax.grad(single_log_likelihood)
         all_grad = jax.vmap(grad_fn, in_axes=(None, 0, 0))(params, X, y)
@@ -76,6 +79,7 @@ class EWCMethod:
 
     def train_task(self, model: MLP, params, state, task: Task, task_idx):
         num_batch = task.train_X.shape[0] // self.batch_size
+        active_classes = tuple(task.classes) if self.task_il_training else None
 
         for ep in range(self.epochs):
             total_loss = 0
@@ -88,7 +92,12 @@ class EWCMethod:
 
                 if task_idx == 0:
                     params, loss = _train_step(
-                        params, batch_X, batch_y, self.lr_task1, model
+                        params,
+                        batch_X,
+                        batch_y,
+                        self.lr_task1,
+                        model,
+                        active_classes,
                     )
                 else:
                     if self.decay < 1.0:
@@ -108,6 +117,7 @@ class EWCMethod:
                         self.lam,
                         self.lr,
                         model,
+                        active_classes,
                     )
 
                 total_loss += loss
