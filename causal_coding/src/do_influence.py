@@ -5,10 +5,32 @@ from causal_coding.src.activations import relu, relu_derivative
 
 
 def compute_jacobians(weights, xs_eq):
+    """Batch-averaged Jacobians used by the Schur–Fisher curvature."""
     jacobians = []
     for l in range(len(weights)):
         avg_mask = jnp.mean(relu_derivative(xs_eq[l]), axis=1)
         jacobians.append(weights[l] * avg_mask[None, :])
+    return jacobians
+
+
+def compute_jacobians_per_sample(weights, xs_eq):
+    """Per-sample Jacobians used to compute per-sample Ã.
+
+    For sample b and layer l:
+        J^{(b)}_l[j, i] = W_l[j, i] · ReLU'(z_l^{(b)}[i]).
+
+    Returns a list of `(B, d_out, d_in)` tensors. Uses only the per-sample
+    ReLU mask; the linearised g_l = W · ReLU(·) then produces the standard
+    Gauss-Newton local Jacobian in the natural-gradient surrogate. Fed into
+    `compute_local_maps` via the `jacobians_per_sample=` kwarg; the batch-
+    averaged Jacobians from `compute_jacobians` are still used to build the
+    Schur curvature `Ḡ_bar`.
+    """
+    jacobians = []
+    for l in range(len(weights)):
+        mask = relu_derivative(xs_eq[l])                    # (d_in, B)
+        # J^{(b)}[j, i] = W[j, i] · mask[i, b]
+        jacobians.append(weights[l][None, :, :] * mask.T[:, None, :])  # (B, d_out, d_in)
     return jacobians
 
 
@@ -25,7 +47,11 @@ def compute_output_fisher(weights, xs_eq):
     return jnp.diag(jnp.mean(probs, axis=1)) - (probs @ probs.T) / B
 
 
-def compute_local_maps(precisions, lateral_pairs, jacobians, ridge=1e-4, output_fisher=None):
+def compute_local_maps(
+    precisions, lateral_pairs, jacobians, ridge=1e-4,
+    output_fisher=None,
+    jacobians_per_sample=None,
+):
     """Schur–Fisher backward recursion for the per-layer local natural maps.
 
     `output_fisher` is the optional categorical Fisher matrix at the output
@@ -40,6 +66,13 @@ def compute_local_maps(precisions, lateral_pairs, jacobians, ridge=1e-4, output_
     lateral. Λ_l = α_l · U_l Uᵀ_l is materialised on demand to a dense
     (d, d) matrix inside `get_lateral`; the Schur recursion needs the dense
     form for H_l = Π + Λ + JᵀΠJ.
+
+    `jacobians_per_sample`: optional list of
+    `(B, d_out, d_in)` tensors. When provided, each `A_tildes[l]` is
+    computed per-sample as `Ḡ_bar_{l+1}^{-1} · Π · J^{(b)}`. The Schur
+    curvature (`build_H`, Schur update to `Ḡ`) still uses the batch-
+    averaged `jacobians` — the Fisher metric is a data-average by design.
+    When omitted, existing (batch-averaged) behaviour is preserved.
     """
     L = len(jacobians)
     # Shape check: lateral_pairs has one entry per hidden layer.
@@ -66,9 +99,9 @@ def compute_local_maps(precisions, lateral_pairs, jacobians, ridge=1e-4, output_
     def apply_above_curvature(l, X):
         """Left-multiply X by the curvature of the layer above (l+1).
 
-        At the output edge with `output_fisher` supplied, this is a full
-        matrix multiply by F_cat. Hidden layers use the cheap element-wise
-        diagonal form (`π[:, None] * X`).
+        Output edge with `output_fisher` supplied: full matrix multiply
+        by F_cat. Hidden layers use the diagonal precision
+        `π[:, None] * X`.
         """
         if l == L - 1 and output_fisher is not None:
             return output_fisher @ X
@@ -91,48 +124,93 @@ def compute_local_maps(precisions, lateral_pairs, jacobians, ridge=1e-4, output_
     if out_lateral is not None:
         G_bar_next = G_bar_next + out_lateral
 
+    use_per_sample = jacobians_per_sample is not None
     A_tildes = [None] * L
     for l in range(L - 1, -1, -1):
-        PJ = apply_above_curvature(l, jacobians[l])
+        # Batch-averaged PJ drives the Schur curvature recursion in either mode.
+        PJ_batch = apply_above_curvature(l, jacobians[l])
         G_bar_next_reg = G_bar_next + ridge * jnp.eye(G_bar_next.shape[0])
-        A_tildes[l] = jnp.linalg.solve(G_bar_next_reg, PJ)
+
+        if use_per_sample:
+            # Per-sample RHS: apply Π to each J^{(b)} then solve against the
+            # shared batch-averaged Ḡ. `jnp.linalg.solve` broadcasts over the
+            # leading batch dim (LU-decomposes Ḡ once, back-substitutes for B
+            # right-hand sides).
+            J_per = jacobians_per_sample[l]                       # (B, d_out, d_in)
+            PJ_per = jax.vmap(lambda J: apply_above_curvature(l, J))(J_per)
+            A_tildes[l] = jnp.linalg.solve(G_bar_next_reg, PJ_per)  # (B, d_out, d_in)
+        else:
+            A_tildes[l] = jnp.linalg.solve(G_bar_next_reg, PJ_batch)  # (d_out, d_in)
 
         if l > 0:
-            schur = PJ.T @ jnp.linalg.solve(G_bar_next_reg, PJ)
+            # Schur update: uses the batch-averaged PJ (Fisher metric semantics).
+            schur = PJ_batch.T @ jnp.linalg.solve(G_bar_next_reg, PJ_batch)
             G_bar_next = build_H(l) - schur
 
     return A_tildes
 
 
-def compute_causal_gates(A_tildes, p=2.0, kappa=1e-3, alpha=0.6, floor_coeff=0.05):
-    """Amplitude-preserving causal gate.
+def compute_causal_gates(A_tildes, p=2.0, kappa=1e-3):
+    """Row-normalised raw causal gate.
 
-    Each row's R = |A|^p / Σ|A|^p (row-sum ≈ 1) is rescaled into a gate
-    whose row-sum is ≈ n_in, so the mean gate value is 1 instead of 1/n_in:
+    Standard input: each `A_k` is a 2D `(d_out, d_in)` batch-averaged Ã.
 
-        G[i, j] = max( 1 + α · (n_in · R[i, j] − 1),  1 − α + floor_coeff · α )
+        r_{ji} = |Ã_{ji}|^p / (Σ_{i'} |Ã_{ji'}|^p + κ)
 
-    α = 0 → identity gate (no causal selectivity, plain Hebbian). Larger α
-    amplifies high-importance synapses and softly damps low-importance
-    synapses toward 1 − α.
+    Per-sample input: each `A_k` is 3D `(B, d_out, d_in)` — the
+    per-sample Ã stack from `compute_local_maps(..., jacobians_per_sample=)`.
+    In that case `|Ã|^p` is averaged across the batch axis before the row
+    normalisation:
+
+        r_{ji} = mean_b(|Ã^{(b)}_{ji}|^p) / (Σ_{i'} mean_b(|Ã^{(b)}_{ji'}|^p) + κ)
+
+    Output is always `(d_out, d_in)`. Properties: `r ∈ [0, 1)`;
+    `Σ_i r_{ji} = 1 − κ/(Σ mean_b|Ã|^p + κ) ∈ [0, 1)`.
     """
     gates = []
     for A_k in A_tildes:
-        abs_C_p = jnp.abs(A_k) ** p
-        denom = jnp.sum(abs_C_p, axis=1, keepdims=True) + kappa
-        R = abs_C_p / denom
-        n_in = A_k.shape[1]
-        G = 1.0 + alpha * (n_in * R - 1.0)
-        floor = 1.0 - alpha + floor_coeff * alpha
-        gates.append(jnp.maximum(G, floor))
+        abs_A_p = jnp.abs(A_k) ** p
+        if abs_A_p.ndim == 3:
+            abs_A_p = jnp.mean(abs_A_p, axis=0)  # average |Ã|^p across batch
+        denom = jnp.sum(abs_A_p, axis=1, keepdims=True) + kappa
+        gates.append(abs_A_p / denom)
     return gates
 
 
-def compute_composite_influence(A_tildes):
-    composites = {}
-    C = A_tildes[0]
-    composites[1] = C
-    for ell in range(1, len(A_tildes)):
-        C = C @ A_tildes[ell]
-        composites[ell + 1] = C
-    return composites
+def compute_causal_gates_per_sample(A_tildes_per_sample, p=2.0, kappa=1e-3):
+    """Per-sample row-normalised causal gate.
+
+    Applies row-normalisation to each sample's own Ã^{(b)}, producing a
+    stack of per-sample gates:
+
+        r^{(b)}_{ji} = |Ã^{(b)}_{ji}|^p / (Σ_{i'} |Ã^{(b)}_{ji'}|^p + κ)
+
+    Row-normalisation runs over parent index `i'`, per row `j`, **per
+    sample b**. Batching is done by applying the Hebbian update per sample
+    and averaging updates.
+
+    Under ReLU + linear-W generative maps, the per-sample denominator
+    `Σ_{i'} |Ã^{(b)}_{ji'}|^p = Σ_{i'} |C[j, i']|^p · mask^{(b)}[i']`
+    sums only over parents that fired in sample b, so `r^{(b)}[j, i]`
+    concentrates gate mass on the peak within the sample's firing
+    subset. This breaks the batch-averaged `C · mask` factorisation
+    that the batch-averaged gate summary collapses to.
+
+    Input: list of `(B, d_out, d_in)` per-layer per-sample Ã tensors.
+    Output: list of `(B, d_out, d_in)` per-layer per-sample gates in
+    `[0, 1)`, with per-row row-sum ≈ `1 − κ / denom^{(b)}[j]`.
+
+    Called by `training.train_step` for the per-sample Hebbian update.
+    Diagnostics can still call `compute_causal_gates` on the
+    same input for a 2D summary of the gate structure.
+    """
+    gates = []
+    for A_k in A_tildes_per_sample:
+        assert A_k.ndim == 3, (
+            f"compute_causal_gates_per_sample expects (B, d_out, d_in) per "
+            f"layer; got shape {A_k.shape}"
+        )
+        abs_A_p = jnp.abs(A_k) ** p                                # (B, d_out, d_in)
+        denom = jnp.sum(abs_A_p, axis=2, keepdims=True) + kappa    # (B, d_out, 1)
+        gates.append(abs_A_p / denom)                              # (B, d_out, d_in)
+    return gates

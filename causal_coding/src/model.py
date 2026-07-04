@@ -5,6 +5,12 @@ from causal_coding.src.lateral import (
     adam_init_per_layer,
     inv_softplus,
 )
+from causal_coding.src.vertical_pruning import (
+    apply_vertical_gates,
+    init_vertical_gate_logits,
+    init_vertical_importance,
+    vertical_adam_init,
+)
 
 
 def he_init(key, shape):
@@ -36,7 +42,7 @@ class CausalCodingModel:
         self.alpha_init = alpha_init
 
     def init_params(self, key):
-        key_w, key_lU = jax.random.split(key)
+        key_w, key_lU = jax.random.split(key, 2)
         weight_keys = jax.random.split(key_w, self.num_layers - 1)
         weights = [
             he_init(weight_keys[l], (self.layer_sizes[l + 1], self.layer_sizes[l]))
@@ -74,12 +80,19 @@ class CausalCodingModel:
                 for U, rho in zip(lateral_U, lateral_log_alpha)
             ]
             lateral_adam_step = jnp.zeros((), dtype=jnp.float32)
+
         else:
             lateral_U = []
             lateral_log_alpha = []
             lateral_cov_ema = []
             lateral_adam_states = []
             lateral_adam_step = jnp.zeros((), dtype=jnp.float32)
+
+        vertical_gate_logits = init_vertical_gate_logits(weights, initial_gate=0.99)
+        vertical_importance = init_vertical_importance(weights)
+        vertical_adam_states = vertical_adam_init(vertical_gate_logits)
+        vertical_layer_scales = [jnp.asarray(0.0) for _ in weights]
+        vertical_adam_step = jnp.zeros((), dtype=jnp.float32)
 
         return {
             "weights": weights,
@@ -90,10 +103,24 @@ class CausalCodingModel:
             "lateral_cov_ema": lateral_cov_ema,
             "lateral_adam_states": lateral_adam_states,
             "lateral_adam_step": lateral_adam_step,
+            "vertical_gate_logits": vertical_gate_logits,
+            "vertical_importance": vertical_importance,
+            "vertical_adam_states": vertical_adam_states,
+            "vertical_adam_step": vertical_adam_step,
+            "vertical_layer_scales": vertical_layer_scales,
+            "vertical_match_loss": jnp.asarray(0.0),
+            "vertical_sparse_loss": jnp.asarray(0.0),
         }
 
     def forward(self, params, X):
         h = X.T
-        for w in params["weights"]:
+        weights = params["weights"]
+        if "vertical_gate_logits" in params and "vertical_layer_scales" in params:
+            weights = apply_vertical_gates(
+                weights,
+                params["vertical_gate_logits"],
+                params["vertical_layer_scales"],
+            )
+        for w in weights:
             h = w @ jnp.maximum(0.0, h)
         return h.T

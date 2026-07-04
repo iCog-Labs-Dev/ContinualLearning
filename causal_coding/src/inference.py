@@ -59,3 +59,29 @@ def infer(weights, xs, precisions, lateral_pairs, num_steps, lr_z):
         return _infer_step(weights, xs, precisions, lateral_pairs, lr_z)
 
     return jax.lax.fori_loop(0, num_steps, body_fn, xs)
+
+
+def infer_with_trajectory(weights, xs, precisions, lateral_pairs, num_steps, lr_z):
+    """Run PC inference and return the full state trajectory.
+
+    Returns `(xs_eq, trajectory)`, where `xs_eq` matches the final state
+    returned by `infer` and `trajectory[l]` has shape
+    `(d_l, batch, num_steps + 1)`, including the initial state at `t=0`.
+
+    Used by regression diagnostics, not by the training loop.
+    """
+    trajectory = [jnp.zeros(z.shape + (num_steps + 1,), dtype=z.dtype) for z in xs]
+    trajectory = [
+        traj_l.at[..., 0].set(z_l)
+        for traj_l, z_l in zip(trajectory, xs)
+    ]
+
+    cur = xs
+    for t in range(num_steps):
+        cur = _infer_step(weights, cur, precisions, lateral_pairs, lr_z)
+        trajectory = [
+            traj_l.at[..., t + 1].set(z_l)
+            for traj_l, z_l in zip(trajectory, cur)
+        ]
+
+    return cur, trajectory
