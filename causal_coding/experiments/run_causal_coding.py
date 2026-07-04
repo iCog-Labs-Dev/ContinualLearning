@@ -33,15 +33,9 @@ method = CausalCodingMethod(
     lambda_s=1e-6,
     batch_size=128,
     epochs=50,
-    gate_alpha=0.3,
-    gate_floor_coeff=0.05,
-    gate_warmup_epochs=15,
-    gate_ramp_epochs=15,
     beta_pi=0.99,
-    epsilon_pi=0.1,
-    alpha_pi=0.05,
     k_probe=10,
-    # Lateral precision optimization.
+    # Lateral precision settings.
     lr_lat=1e-3,
     beta_cov=0.99,
     eps_lat=1e-2,
@@ -51,6 +45,16 @@ method = CausalCodingMethod(
     beta_logdet=0.1,
     lambda_fro=1e-2,
     lambda_U=1e-5,
+    # Clarity disabled for this benchmark run.
+    lambda_d=0.0,
+    clarity_t=1.0,
+    clarity_eps=1e-4,
+    # Tight-clipped structured diagonal residual precision.
+    pi0=2.718281828459045,
+    rho_v=0.1,
+    delta_abs=1e-12,
+    d_min=0.75,
+    d_max=1.5,
 )
 
 CLBenchmark(method=method, model=model, tasks=tasks, name="causal_coding").run(
