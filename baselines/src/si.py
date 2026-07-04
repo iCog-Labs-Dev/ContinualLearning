@@ -2,18 +2,18 @@ import jax
 import jax.numpy as jnp
 from functools import partial
 from core.model import MLP
-from core.metrics import cross_entropy
+from core.metrics import compute_loss
 from core.data import Task
 from core.base import SIState
 
 
-def _loss_fn(params, X, y, model: MLP):
+def _loss_fn(params, X, y, model: MLP, active_classes=None):
     logits = model.forward(params, X)
-    return cross_entropy(logits, y)
+    return compute_loss(logits, y, active_classes)
 
 
-def _si_loss_fn(params, X, y, old_params, omega, lam, model: MLP):
-    task_loss = _loss_fn(params, X, y, model)
+def _si_loss_fn(params, X, y, old_params, omega, lam, model: MLP, active_classes=None):
+    task_loss = _loss_fn(params, X, y, model, active_classes)
     penality = jax.tree.map(
         lambda o, p, op: jnp.sum(o * (p - op) ** 2), omega, params, old_params
     )
@@ -22,10 +22,12 @@ def _si_loss_fn(params, X, y, old_params, omega, lam, model: MLP):
     return task_loss + (lam / 2) * total_penality
 
 
-@partial(jax.jit, static_argnums=(8,))
-def _si_train_step(params, X, y, old_params, omega, lam, lr, contribution_sum, model):
+@partial(jax.jit, static_argnums=(8, 9))
+def _si_train_step(
+    params, X, y, old_params, omega, lam, lr, contribution_sum, model, active_classes=None
+):
     loss, grad = jax.value_and_grad(_si_loss_fn)(
-        params, X, y, old_params, omega, lam, model
+        params, X, y, old_params, omega, lam, model, active_classes
     )
 
     new_params = jax.tree.map(lambda params, grad: params - lr * grad, params, grad)
@@ -58,12 +60,14 @@ class SIMethod:
         self.epsilon = epsilon
         self.decay = decay
         self.normalize = normalize
+        self.task_il_training = False
 
     def train_task(self, model, params, state, task: Task, task_idx):
         initial_params = params
         contribution_sum = jax.tree.map(lambda p: jnp.zeros_like(p), params)
         old_params = state.old_params
         cumulative_omega = state.cumulative_omega
+        active_classes = tuple(task.classes) if self.task_il_training else None
 
         for ep in range(self.epochs):
             num_batch = task.train_X.shape[0] // self.batch_size
@@ -87,6 +91,7 @@ class SIMethod:
                         self.lr_task1,
                         contribution_sum,
                         model,
+                        active_classes,
                     )
                 else:
                     new_params, loss, new_contribution = _si_train_step(
@@ -99,6 +104,7 @@ class SIMethod:
                         self.lr,
                         contribution_sum,
                         model,
+                        active_classes,
                     )
 
                 params = new_params

@@ -16,12 +16,10 @@ class BenchmarkResults:
         cil = self.metrics["class_il"]
         print(f"\n=== {self.method_name} ===")
         print(
-            f"Task-IL  | ACC: {til['average_accuracy']:.4f} | NLL: {til['average_nll']:.4f}"
-            f" | BWT: {til['backward_transfer']:.4f} | FWT: {til['forward_transfer']:.4f}"
-            f" | Forgetting: {til['forgetting']:.4f}"
+            f"Task-IL  | ACC: {til['average_accuracy']:.4f} | BWT: {til['backward_transfer']:.4f}"
+            f" | FWT: {til['forward_transfer']:.4f} | Forgetting: {til['forgetting']:.4f}"
         )
         print(
-            f"Class-IL | ACC: {cil['average_accuracy']:.4f} | NLL: {cil['average_nll']:.4f}"
-            f" | BWT: {cil['backward_transfer']:.4f} | FWT: {cil['forward_transfer']:.4f}"
-            f" | Forgetting: {cil['forgetting']:.4f}"
+            f"Class-IL | ACC: {cil['average_accuracy']:.4f} | BWT: {cil['backward_transfer']:.4f}"
+            f" | FWT: {cil['forward_transfer']:.4f} | Forgetting: {cil['forgetting']:.4f}"
         )

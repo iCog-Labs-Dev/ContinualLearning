@@ -1,3 +1,5 @@
+import copy
+
 from .evaluator import Evaluator
 from .results import BenchmarkResults
 from .metrics import average_accuracy, backward_transfer, forward_transfer, forgetting
@@ -12,7 +14,12 @@ class CLBenchmark:
         self.model = model
         self.tasks = tasks
         self.name = name
-        self.config = config if config is not None else vars(method)
+        self.config = dict(config) if config is not None else dict(vars(method))
+        self.config.pop("task_il_training", None)
+        self.config["protocols"] = {
+            "class_il": "CE training / softmax evaluation",
+            "task_il": "BCE training / sigmoid evaluation",
+        }
         self._evaluator = Evaluator()
 
     def run(self, params, state) -> BenchmarkResults:
@@ -20,41 +27,16 @@ class CLBenchmark:
             self.model, params, self.tasks
         )
 
-        class_il_matrix = []
-        task_il_matrix = []
-        class_il_nll_matrix = []
-        task_il_nll_matrix = []
-
-        for task_idx, task in enumerate(self.tasks):
-            print(f"\n--- Training Task {task_idx + 1} ---")
-            params, state, _ = self.method.train_task(
-                self.model, params, state, task, task_idx
-            )
-
-            class_il_row, task_il_row, class_il_nll_row, task_il_nll_row = (
-                self._evaluator.evaluate_all(self.model, params, self.tasks)
-            )
-            class_il_matrix.append(class_il_row)
-            task_il_matrix.append(task_il_row)
-            class_il_nll_matrix.append(class_il_nll_row)
-            task_il_nll_matrix.append(task_il_nll_row)
-
-            for i, (cil, til, cil_nll, til_nll) in enumerate(
-                zip(class_il_row, task_il_row, class_il_nll_row, task_il_nll_row)
-            ):
-                print(
-                    f"  Task {i + 1} -> "
-                    f"Class-IL: {cil * 100:.2f}% (NLL {cil_nll:.3f}) | "
-                    f"Task-IL: {til * 100:.2f}% (NLL {til_nll:.3f})"
-                )
+        class_il_matrix = self._run_protocol(
+            params, state, protocol_name="Class-IL", task_il_training=False
+        )
+        task_il_matrix = self._run_protocol(
+            params, state, protocol_name="Task-IL", task_il_training=True
+        )
+        self.method.task_il_training = False
 
         metrics = self._compute_metrics(
-            class_il_matrix,
-            task_il_matrix,
-            class_il_nll_matrix,
-            task_il_nll_matrix,
-            class_il_baselines,
-            task_il_baselines,
+            class_il_matrix, task_il_matrix, class_il_baselines, task_il_baselines
         )
 
         results = BenchmarkResults(
@@ -73,19 +55,49 @@ class CLBenchmark:
 
         return results
 
+    def _run_protocol(self, params, state, protocol_name, task_il_training):
+        self.method.task_il_training = task_il_training
+        run_params = params
+        run_state = copy.deepcopy(state)
+        matrix = []
+        train_loss = "BCE" if task_il_training else "CE"
+        eval_mode = "sigmoid" if task_il_training else "softmax"
+
+        print(
+            f"\n=== {protocol_name} run "
+            f"({train_loss} training / {eval_mode} evaluation) ==="
+        )
+
+        for task_idx, task in enumerate(self.tasks):
+            print(f"\n--- Training Task {task_idx + 1} ---")
+            run_params, run_state, _ = self.method.train_task(
+                self.model, run_params, run_state, task, task_idx
+            )
+
+            if task_il_training:
+                row = [
+                    self._evaluator.evaluate(self.model, run_params, t, t.classes)
+                    for t in self.tasks
+                ]
+            else:
+                row = [
+                    self._evaluator.evaluate(self.model, run_params, t)
+                    for t in self.tasks
+                ]
+
+            matrix.append(row)
+
+            for i, acc in enumerate(row):
+                print(f"  Task {i + 1} -> {protocol_name}: {acc * 100:.2f}%")
+
+        return matrix
+
     def _compute_metrics(
-        self,
-        class_il_matrix,
-        task_il_matrix,
-        class_il_nll_matrix,
-        task_il_nll_matrix,
-        class_il_baselines,
-        task_il_baselines,
+        self, class_il_matrix, task_il_matrix, class_il_baselines, task_il_baselines
     ) -> dict:
         return {
             "task_il": {
                 "average_accuracy": float(average_accuracy(task_il_matrix)),
-                "average_nll": float(average_accuracy(task_il_nll_matrix)),
                 "backward_transfer": float(backward_transfer(task_il_matrix)),
                 "forward_transfer": float(
                     forward_transfer(task_il_matrix, task_il_baselines)
@@ -94,7 +106,6 @@ class CLBenchmark:
             },
             "class_il": {
                 "average_accuracy": float(average_accuracy(class_il_matrix)),
-                "average_nll": float(average_accuracy(class_il_nll_matrix)),
                 "backward_transfer": float(backward_transfer(class_il_matrix)),
                 "forward_transfer": float(
                     forward_transfer(class_il_matrix, class_il_baselines)

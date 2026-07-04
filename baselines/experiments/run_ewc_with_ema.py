@@ -33,39 +33,66 @@ method = EWCDRMethod(
     decay=0.9,
     anchor_alpha=0.5,
 )
-state = EWCState(
-    old_params=params,
-    cumulative_fisher=jax.tree.map(lambda p: jnp.zeros_like(p), params),
-)
-
 _evaluator = Evaluator()
 
 class_il_baselines, task_il_baselines = _evaluator.compute_baselines(model, params, tasks)
 
-ema_params = params
-class_il_matrix = []
-task_il_matrix = []
 
-for task_idx, task in enumerate(tasks):
-    print(f"\n--- Training Task {task_idx + 1} ---")
-    params, state, _ = method.train_task(model, params, state, task, task_idx)
-
-    ema_params = jax.tree.map(
-        lambda ema, new: method.anchor_alpha * ema + (1 - method.anchor_alpha) * new,
-        ema_params,
-        params,
+def _initial_state():
+    return EWCState(
+        old_params=params,
+        cumulative_fisher=jax.tree.map(lambda p: jnp.zeros_like(p), params),
     )
 
-    class_il_row = [_evaluator.evaluate(model, ema_params, t) for t in tasks]
-    task_il_row = [_evaluator.evaluate(model, ema_params, t, t.classes) for t in tasks]
 
-    class_il_matrix.append(class_il_row)
-    task_il_matrix.append(task_il_row)
+def _run_protocol(protocol_name, task_il_training):
+    method.task_il_training = task_il_training
+    run_params = params
+    run_state = _initial_state()
+    ema_params = params
+    matrix = []
+    train_loss = "BCE" if task_il_training else "CE"
+    eval_mode = "sigmoid" if task_il_training else "softmax"
 
-    for i, (acc_cil, acc_til) in enumerate(zip(class_il_row, task_il_row)):
-        print(
-            f"  Task {i + 1} -> Class-IL: {acc_cil * 100:.2f}% | Task-IL: {acc_til * 100:.2f}%"
+    print(
+        f"\n=== {protocol_name} run "
+        f"({train_loss} training / {eval_mode} evaluation) ==="
+    )
+
+    for task_idx, task in enumerate(tasks):
+        print(f"\n--- Training Task {task_idx + 1} ---")
+        run_params, run_state, _ = method.train_task(
+            model, run_params, run_state, task, task_idx
         )
+
+        ema_params = jax.tree.map(
+            lambda ema, new: method.anchor_alpha * ema + (1 - method.anchor_alpha) * new,
+            ema_params,
+            run_params,
+        )
+
+        if task_il_training:
+            row = [_evaluator.evaluate(model, ema_params, t, t.classes) for t in tasks]
+        else:
+            row = [_evaluator.evaluate(model, ema_params, t) for t in tasks]
+
+        matrix.append(row)
+
+        for i, acc in enumerate(row):
+            print(f"  Task {i + 1} -> {protocol_name}: {acc * 100:.2f}%")
+
+    return matrix
+
+
+class_il_matrix = _run_protocol("Class-IL", task_il_training=False)
+task_il_matrix = _run_protocol("Task-IL", task_il_training=True)
+method.task_il_training = False
+config = dict(vars(method))
+config.pop("task_il_training", None)
+config["protocols"] = {
+    "class_il": "CE training / softmax evaluation",
+    "task_il": "BCE training / sigmoid evaluation",
+}
 
 metrics = {
     "task_il": {
@@ -87,5 +114,5 @@ til, cil = metrics["task_il"], metrics["class_il"]
 print(f"Task-IL  | ACC: {til['average_accuracy']:.4f} | BWT: {til['backward_transfer']:.4f} | FWT: {til['forward_transfer']:.4f} | Forgetting: {til['forgetting']:.4f}")
 print(f"Class-IL | ACC: {cil['average_accuracy']:.4f} | BWT: {cil['backward_transfer']:.4f} | FWT: {cil['forward_transfer']:.4f} | Forgetting: {cil['forgetting']:.4f}")
 
-save_results("ewc_with_ema", metrics, class_il_matrix, task_il_matrix, config=vars(method))
+save_results("ewc_with_ema", metrics, class_il_matrix, task_il_matrix, config=config)
 plot_all("ewc_with_ema", class_il_matrix, task_il_matrix)
