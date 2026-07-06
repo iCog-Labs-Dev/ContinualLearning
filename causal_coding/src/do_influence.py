@@ -34,14 +34,26 @@ def compute_jacobians_per_sample(weights, xs_eq):
     return jacobians
 
 
-def compute_output_fisher(weights, xs_eq):
-    """Categorical Fisher F_cat = mean_b [diag(p_b) − p_b p_bᵀ] at equilibrium.
+def compute_output_fisher(weights, xs_eq, task_il_training=False, active_mask=None):
+    """Fisher curvature at the output Schur base case (discriminative head).
 
-    Used as the curvature at the output Schur base case (discriminative
-    classification head). Replaces the Gaussian `diag(π_L)` everywhere the
-    output edge enters the Schur recursion.
+    Replaces the Gaussian `diag(π_L)` everywhere the output edge enters the
+    Schur recursion. Two protocols, two output distributions:
+
+    - Class-IL (default): categorical softmax head. Categorical Fisher
+      `F_cat = mean_b [diag(p_b) − p_b p_bᵀ]`, full and rank K−1.
+    - Task-IL (`task_il_training=True`): independent-Bernoulli head over the
+      task's active classes. Diagonal Bernoulli Fisher
+      `F_bern = diag(active_mask · mean_b[p_b (1 − p_b)])` with `p = sigmoid`.
+      The `active_mask` zeros the diagonal on output units of classes outside
+      the current task, so those rows carry no distributional curvature. The
+      Schur solve's ridge term is the only stabilizer on inactive rows.
     """
     logits = weights[-1] @ relu(xs_eq[-2])
+    if task_il_training:
+        probs = jax.nn.sigmoid(logits)
+        diag = active_mask * jnp.mean(probs * (1.0 - probs), axis=1)
+        return jnp.diag(diag)
     probs = jax.nn.softmax(logits, axis=0)
     B = probs.shape[1]
     return jnp.diag(jnp.mean(probs, axis=1)) - (probs @ probs.T) / B

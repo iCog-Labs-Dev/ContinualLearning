@@ -25,7 +25,7 @@ from causal_coding.src.vertical_pruning import (
 )
 
 
-@partial(jax.jit, static_argnums=(3, 4))
+@partial(jax.jit, static_argnums=(3, 4, 45, 46))
 def train_step(
     params,
     x_batch,
@@ -71,6 +71,9 @@ def train_step(
     delta_abs,
     d_min,
     d_max,
+    active_mask=None,
+    task_il_training=False,
+    gate_norm="sum",
 ):
     weights = params["weights"]
     log_precisions = params["log_precisions"]
@@ -110,7 +113,10 @@ def train_step(
     # Early fixed inference steps with residual capture for precision EMA.
     early_eps_sq_sum = [jnp.zeros_like(xs[l + 1]) for l in range(num_hidden)]
     for _ in range(k_probe):
-        xs = _infer_step(effective_weights, xs, precisions, lateral_pairs, lr_z)
+        xs = _infer_step(
+            effective_weights, xs, precisions, lateral_pairs, lr_z,
+            task_il_training, active_mask,
+        )
         for l in range(num_hidden):
             pred = effective_weights[l] @ relu(xs[l])
             eps = xs[l + 1] - pred
@@ -120,15 +126,18 @@ def train_step(
 
     def body_fn(_, xs_inner):
         return _infer_step(
-            effective_weights, xs_inner, precisions, lateral_pairs, lr_z
+            effective_weights, xs_inner, precisions, lateral_pairs, lr_z,
+            task_il_training, active_mask,
         )
 
     xs = jax.lax.fori_loop(0, remaining_steps, body_fn, xs)
-    errors = compute_errors(effective_weights, xs)
+    errors = compute_errors(effective_weights, xs, task_il_training, active_mask)
 
     jacobians = compute_jacobians(effective_weights, xs)
     jacobians_per_sample = compute_jacobians_per_sample(effective_weights, xs)
-    output_fisher = compute_output_fisher(effective_weights, xs)
+    output_fisher = compute_output_fisher(
+        effective_weights, xs, task_il_training, active_mask
+    )
     A_tildes = compute_local_maps(
         precisions,
         lateral_pairs,
@@ -137,8 +146,8 @@ def train_step(
         output_fisher=output_fisher,
         jacobians_per_sample=jacobians_per_sample,
     )
-    # Apply per-sample gates to per-sample Hebbian outer products, then
-    # average across the batch. Diagnostics still use a 2D gate summary.
+    # Apply per-sample gates to per-sample Hebbian outer products, then average
+    # across the batch.
     gates_per_sample = compute_causal_gates_per_sample(A_tildes, gate_p, gate_kappa)
 
     def vertical_loss_fn(logits):
@@ -193,7 +202,17 @@ def train_step(
         per_sample_hebbian = jnp.einsum(
             "jb,ib->bji", weighted_error, relu(xs[l])
         )
-        delta_w = jnp.mean(gates_per_sample[l] * per_sample_hebbian, axis=0)
+        gated_hebbian = gates_per_sample[l] * per_sample_hebbian
+        if gate_norm == "match":
+            # Preserve each per-sample child update norm after gating.
+            # Zero-row guard avoids division by near-zero norms.
+            raw_norm = jnp.linalg.norm(per_sample_hebbian, axis=2, keepdims=True)
+            gated_norm = jnp.linalg.norm(gated_hebbian, axis=2, keepdims=True)
+            scale = jnp.where(
+                gated_norm > 1e-12, raw_norm / (gated_norm + 1e-12), 0.0
+            )
+            gated_hebbian = gated_hebbian * scale
+        delta_w = jnp.mean(gated_hebbian, axis=0)
         gated_delta_w = vertical_eff_gates[l] * delta_w
         new_weights.append(
             weights[l] + lr_w * gated_delta_w - lambda_s * jnp.sign(weights[l])
@@ -293,9 +312,19 @@ def train_step(
         new_weights, new_vertical_gate_logits, vertical_layer_scales
     )
     prediction = new_effective_weights[-1] @ relu(xs[-2])
-    probs = jax.nn.softmax(prediction, axis=0)
-    log_probs = jnp.log(probs + 1e-8)
-    ce = -jnp.sum(y_batch.T * log_probs, axis=0)
-    loss = jnp.mean(ce)
+    if task_il_training:
+        # Active-slice BCE: sum over active classes, then average over samples.
+        p = jax.nn.sigmoid(prediction)
+        bce = -(
+            y_batch.T * jnp.log(p + 1e-8)
+            + (1.0 - y_batch.T) * jnp.log(1.0 - p + 1e-8)
+        )
+        bce = active_mask[:, None] * bce
+        loss = jnp.mean(jnp.sum(bce, axis=0))
+    else:
+        probs = jax.nn.softmax(prediction, axis=0)
+        log_probs = jnp.log(probs + 1e-8)
+        ce = -jnp.sum(y_batch.T * log_probs, axis=0)
+        loss = jnp.mean(ce)
 
     return new_params, loss

@@ -23,14 +23,14 @@ DEFAULT_RESULTS_DIR = os.path.join(
 )
 RESULTS_DIR = os.environ.get("CC_RESULTS_DIR", DEFAULT_RESULTS_DIR)
 DIAG_BATCH_SIZE = 256
+DIAG_EVERY_EPOCHS = 5
 INCLUDE_VLCP_SWEEP = False
 
 
-def _dump_params_for_eigenanalysis(params, path):
-    """Save trained arrays needed for the Λ/C_ema eigenanalysis.
+def _dump_model_matrices(params, path):
+    """Save trained model matrices for external analysis.
 
-    Skips Adam states, gate logits, and importance arrays — the eigenanalysis
-    only needs the model matrices.
+    Skips Adam states, gate logits, and importance arrays.
     """
     out = {}
     for l, w in enumerate(params.get("weights", [])):
@@ -74,6 +74,7 @@ def _run_config(model, method, vertical_mode):
         "num_inference_steps": method.num_inference_steps,
         "gate_p": method.gate_p,
         "gate_kappa": method.gate_kappa,
+        "gate_norm": method.gate_norm,
         "ridge": method.ridge,
         "lambda_s": method.lambda_s,
         "batch_size": method.batch_size,
@@ -223,6 +224,8 @@ def main():
         # Vertical soft-pruning gates.
         vertical_pruning_enabled=vertical_enabled,
         vertical_layer_scales=vertical_layer_scales,
+
+        gate_norm="match",
     )
     method = CausalCodingMethod(**method_kwargs)
 
@@ -241,9 +244,13 @@ def main():
     pprint_diag_summary(pre_diag)
     diag_records.append(pre_diag)
 
-    # Per-epoch diagnostics skip the more expensive state-comparison diagnostics.
+    # Periodic diagnostics skip the more expensive state-comparison checks.
     def epoch_hook(epoch_params, epoch_idx, epoch_loss):
-        label = f"epoch_{epoch_idx + 1}"
+        epoch_num = epoch_idx + 1
+        if epoch_num % DIAG_EVERY_EPOCHS != 0 and epoch_num != method.epochs:
+            return
+
+        label = f"epoch_{epoch_num}"
         diag = run_full_diagnostics(
             model, epoch_params, method,
             diag_X, diag_y,
@@ -318,10 +325,9 @@ def main():
         )
     print(f"VLCP regression diagnostics written to {vlcp_output_path}")
 
-    # Dump trained model matrices for later eigenanalysis
-    # (Λ, C_ema, weights).
+    # Dump trained model matrices: Λ, C_ema, and weights.
     params_path = os.path.join(RESULTS_DIR, "params.npz")
-    _dump_params_for_eigenanalysis(params, params_path)
+    _dump_model_matrices(params, params_path)
     print(f"Params written to {params_path}")
 
 

@@ -74,12 +74,16 @@ class CausalCodingMethod:
         adam_beta2_vert=0.999,
         adam_eps_vert=1e-8,
         grad_clip_norm_vert=1.0,
+        gate_norm="sum",
     ):
         self.lr_z = lr_z
         self.lr_w = lr_w
         self.num_inference_steps = num_inference_steps
         self.gate_p = gate_p
         self.gate_kappa = gate_kappa
+        # Causal-gate magnitude normalization: "sum" keeps row sums near 1;
+        # "match" preserves each row's update norm after gating.
+        self.gate_norm = gate_norm
         self.ridge = ridge
         self.lambda_s = lambda_s
         self.batch_size = batch_size
@@ -168,6 +172,8 @@ class CausalCodingMethod:
         y_onehot,
         lateral_force_scale,
         layer_scales,
+        task_il_training=False,
+        active_mask=None,
     ):
         n = min(int(self.vertical_importance_batch_size), int(task.train_X.shape[0]))
         x_imp = task.train_X[:n]
@@ -191,6 +197,8 @@ class CausalCodingMethod:
             window=self.vertical_importance_window,
             num_iters=self.vertical_importance_num_iters,
             standardize_x=self.vertical_importance_standardize_x,
+            task_il_training=task_il_training,
+            active_mask=active_mask,
         )
         new_params = dict(params)
         new_params["vertical_importance"] = importance
@@ -200,6 +208,15 @@ class CausalCodingMethod:
         num_classes = model.layer_sizes[-1]
         y_onehot = jnp.eye(num_classes)[task.train_y]
         num_batch = task.train_X.shape[0] // self.batch_size
+
+        # Task-IL uses an independent-Bernoulli output edge restricted to the
+        # task's active classes. Class-IL uses the full categorical softmax
+        # head.
+        task_il_training = getattr(self, "task_il_training", False)
+        if task_il_training:
+            active_mask = jnp.zeros(num_classes).at[jnp.array(task.classes)].set(1.0)
+        else:
+            active_mask = jnp.ones(num_classes)
 
         for ep in range(self.epochs):
             if task_idx == 0:
@@ -237,6 +254,8 @@ class CausalCodingMethod:
                     y_onehot,
                     lateral_force_scale,
                     vertical_layer_scales,
+                    task_il_training=task_il_training,
+                    active_mask=active_mask,
                 )
 
             total_loss = 0.0
@@ -291,6 +310,9 @@ class CausalCodingMethod:
                     self.delta_abs,
                     self.d_min,
                     self.d_max,
+                    active_mask,
+                    task_il_training,
+                    self.gate_norm,
                 )
                 total_loss += loss
 

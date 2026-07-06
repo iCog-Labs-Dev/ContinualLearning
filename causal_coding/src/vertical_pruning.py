@@ -178,8 +178,15 @@ def compute_regression_importance(
     window_end=None,
     num_iters=50,
     standardize_x=False,
+    task_il_training=False,
+    active_mask=None,
 ):
-    """Compute normalized regression importances for all layers."""
+    """Compute normalized regression importances for all layers.
+
+    `task_il_training` and `active_mask` select the output-edge error model
+    used during inference relaxation. These settings match the main training
+    step so pruning gates are fit against the same output model.
+    """
     precisions = [jnp.exp(lp) for lp in log_precisions]
     lateral_pairs = _build_lateral_pairs(
         lateral_U_list, lateral_log_alpha_list, lateral_force_scale
@@ -192,6 +199,8 @@ def compute_regression_importance(
         lateral_pairs,
         num_inference_steps,
         lr_z,
+        task_il_training,
+        active_mask,
     )
 
     raw_importance = []
