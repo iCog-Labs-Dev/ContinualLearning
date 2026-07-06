@@ -2,7 +2,16 @@ import copy
 
 from .evaluator import Evaluator
 from .results import BenchmarkResults
-from .metrics import average_accuracy, backward_transfer, forward_transfer, forgetting
+from .metrics import (
+    average_accuracy,
+    backward_transfer,
+    forward_transfer,
+    forgetting,
+    backward_transfer_nll,
+    bwt_nll,
+    forgetting_nll,
+    forward_transfer_nll,
+)
 from .logger import save_results
 from .plotter import plot_all
 
@@ -23,20 +32,31 @@ class CLBenchmark:
         self._evaluator = Evaluator()
 
     def run(self, params, state) -> BenchmarkResults:
-        class_il_baselines, task_il_baselines = self._evaluator.compute_baselines(
-            self.model, params, self.tasks
-        )
+        (
+            class_il_baselines,
+            task_il_baselines,
+            class_il_nll_baselines,
+            task_il_nll_baselines,
+        ) = self._evaluator.compute_baselines(self.model, params, self.tasks)
 
-        class_il_matrix = self._run_protocol(
+        class_il_matrix, class_il_nll_matrix, _ = self._run_protocol(
             params, state, protocol_name="Class-IL", task_il_training=False
         )
-        task_il_matrix = self._run_protocol(
+        task_il_matrix, task_il_nll_matrix, task_il_bce_matrix = self._run_protocol(
             params, state, protocol_name="Task-IL", task_il_training=True
         )
         self.method.task_il_training = False
 
         metrics = self._compute_metrics(
-            class_il_matrix, task_il_matrix, class_il_baselines, task_il_baselines
+            class_il_matrix,
+            task_il_matrix,
+            class_il_nll_matrix,
+            task_il_nll_matrix,
+            task_il_bce_matrix,
+            class_il_baselines,
+            task_il_baselines,
+            class_il_nll_baselines,
+            task_il_nll_baselines,
         )
 
         results = BenchmarkResults(
@@ -50,7 +70,16 @@ class CLBenchmark:
         )
 
         results.summary()
-        save_results(self.name, metrics, class_il_matrix, task_il_matrix, self.config)
+        save_results(
+            self.name,
+            metrics,
+            class_il_matrix,
+            task_il_matrix,
+            self.config,
+            class_il_nll_matrix=class_il_nll_matrix,
+            task_il_nll_matrix=task_il_nll_matrix,
+            task_il_bce_matrix=task_il_bce_matrix,
+        )
         plot_all(self.name, class_il_matrix, task_il_matrix)
 
         return results
@@ -59,7 +88,10 @@ class CLBenchmark:
         self.method.task_il_training = task_il_training
         run_params = params
         run_state = copy.deepcopy(state)
-        matrix = []
+        acc_matrix = []
+        nll_matrix = []
+        # Secondary Bernoulli BCE-NLL matrix is Task-IL only.
+        bce_matrix = [] if task_il_training else None
         train_loss = "BCE" if task_il_training else "CE"
         eval_mode = "sigmoid" if task_il_training else "softmax"
 
@@ -85,31 +117,65 @@ class CLBenchmark:
                     for t in self.tasks
                 ]
 
-            matrix.append(row)
+            acc_row = [acc for acc, _, _ in row]
+            nll_row = [nll for _, nll, _ in row]
+            acc_matrix.append(acc_row)
+            nll_matrix.append(nll_row)
+            if task_il_training:
+                bce_matrix.append([bce for _, _, bce in row])
 
-            for i, acc in enumerate(row):
-                print(f"  Task {i + 1} -> {protocol_name}: {acc * 100:.2f}%")
+            for i, (acc, nll, _bce) in enumerate(row):
+                print(
+                    f"  Task {i + 1} -> {protocol_name}: "
+                    f"{acc * 100:.2f}% (NLL {nll:.3f})"
+                )
 
-        return matrix
+        return acc_matrix, nll_matrix, bce_matrix
 
     def _compute_metrics(
-        self, class_il_matrix, task_il_matrix, class_il_baselines, task_il_baselines
+        self,
+        class_il_matrix,
+        task_il_matrix,
+        class_il_nll_matrix,
+        task_il_nll_matrix,
+        task_il_bce_matrix,
+        class_il_baselines,
+        task_il_baselines,
+        class_il_nll_baselines,
+        task_il_nll_baselines,
     ) -> dict:
-        return {
-            "task_il": {
-                "average_accuracy": float(average_accuracy(task_il_matrix)),
-                "backward_transfer": float(backward_transfer(task_il_matrix)),
-                "forward_transfer": float(
-                    forward_transfer(task_il_matrix, task_il_baselines)
-                ),
-                "forgetting": float(forgetting(task_il_matrix)),
-            },
-            "class_il": {
-                "average_accuracy": float(average_accuracy(class_il_matrix)),
-                "backward_transfer": float(backward_transfer(class_il_matrix)),
-                "forward_transfer": float(
-                    forward_transfer(class_il_matrix, class_il_baselines)
-                ),
-                "forgetting": float(forgetting(class_il_matrix)),
-            },
+        task_il = {
+            "average_accuracy": float(average_accuracy(task_il_matrix)),
+            "backward_transfer": float(backward_transfer(task_il_matrix)),
+            "forward_transfer": float(
+                forward_transfer(task_il_matrix, task_il_baselines)
+            ),
+            "forgetting": float(forgetting(task_il_matrix)),
+            "average_nll": float(average_accuracy(task_il_nll_matrix)),
+            "per_task_nll": [float(v) for v in task_il_nll_matrix[-1]],
+            "backward_transfer_nll": float(backward_transfer_nll(task_il_nll_matrix)),
+            "bwt_nll": float(bwt_nll(task_il_nll_matrix)),
+            "forgetting_nll": float(forgetting_nll(task_il_nll_matrix)),
+            "forward_transfer_nll": float(
+                forward_transfer_nll(task_il_nll_matrix, task_il_nll_baselines)
+            ),
+            "average_bce_nll": float(average_accuracy(task_il_bce_matrix)),
+            "per_task_bce_nll": [float(v) for v in task_il_bce_matrix[-1]],
         }
+        class_il = {
+            "average_accuracy": float(average_accuracy(class_il_matrix)),
+            "backward_transfer": float(backward_transfer(class_il_matrix)),
+            "forward_transfer": float(
+                forward_transfer(class_il_matrix, class_il_baselines)
+            ),
+            "forgetting": float(forgetting(class_il_matrix)),
+            "average_nll": float(average_accuracy(class_il_nll_matrix)),
+            "per_task_nll": [float(v) for v in class_il_nll_matrix[-1]],
+            "backward_transfer_nll": float(backward_transfer_nll(class_il_nll_matrix)),
+            "bwt_nll": float(bwt_nll(class_il_nll_matrix)),
+            "forgetting_nll": float(forgetting_nll(class_il_nll_matrix)),
+            "forward_transfer_nll": float(
+                forward_transfer_nll(class_il_nll_matrix, class_il_nll_baselines)
+            ),
+        }
+        return {"task_il": task_il, "class_il": class_il}
