@@ -11,8 +11,6 @@ def tanh(x):
     return jnp.tanh(x)
 
 
-
-
 def dtanh(x):
     """
     Analytical derivative of tanh.

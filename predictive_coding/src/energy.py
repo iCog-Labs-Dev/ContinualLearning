@@ -5,18 +5,16 @@ import jax.numpy as jnp
 from .utils import tanh
 
 
+# predicts the lower layer by using  the upper layer states and the wieghts connecting them to it
+
 def predict_lower(params, states):
     """
     Generic top-down predictions.
 
-    Parameters
-    ----------
     params : list
        
         params[i] predicts state i from state i+1
 
-    Returns
-    -------
     """
 
     predictions = {}
@@ -30,10 +28,14 @@ def predict_lower(params, states):
             layer["b"]
         )
 
+
     return predictions
 
 
+# compute the errors which is the differene between the predicted state and the actual state 
+
 def compute_errors(params, states):
+
     """
     Compute all prediction errors.
 
@@ -51,14 +53,14 @@ def compute_errors(params, states):
 
 
 
-
+# calculates the total energy which is simply the sum of all the errors 
 def compute_total_energy(params, states):
     """
     E = 1/2 Σ ||e_i||²
 
-    Returns scalar batch-mean energy.
+    Returns per-sample energy of shape (batch_size,).
     """
-
+    
     errors = compute_errors(params, states)
 
     total_energy = 0.0
@@ -69,4 +71,4 @@ def compute_total_energy(params, states):
             axis=-1
         )
 
-    return jnp.mean(total_energy)
+    return total_energy

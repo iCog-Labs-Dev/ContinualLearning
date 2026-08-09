@@ -1,0 +1,185 @@
+
+=== Class-IL run (CE training / softmax evaluation) ===
+
+--- Training Task 1 ---
+
+[PCNMethod] Task 1 | Class-IL | inference_steps=20 | eta_x=0.1 | eta_w=0.005
+  Task 1 energy before training: 292.0548
+  Epoch   1/5 | avg settled energy: 56.4809
+  Epoch   2/5 | avg settled energy: 32.9535
+  Epoch   3/5 | avg settled energy: 27.7858
+  Epoch   4/5 | avg settled energy: 24.7596
+  Epoch   5/5 | avg settled energy: 22.6235
+  Task 1 energy after training:  21.7157
+  Task 1 done. Mean train energy over epochs: 32.9207
+  Task 1 -> Class-IL: 70.78% (NLL 1.673)
+  Task 2 -> Class-IL: 11.26% (NLL 2.169)
+  Task 3 -> Class-IL: 45.78% (NLL 1.862)
+  Task 4 -> Class-IL: 7.50% (NLL 2.133)
+  Task 5 -> Class-IL: 0.50% (NLL 2.385)
+
+--- Training Task 2 ---
+
+[PCNMethod] Task 2 | Class-IL | inference_steps=20 | eta_x=0.1 | eta_w=0.005
+  Task 2 energy before training: 59.8285
+  Epoch   1/5 | avg settled energy: 45.5309
+  Epoch   2/5 | avg settled energy: 37.6131
+  Epoch   3/5 | avg settled energy: 33.4509
+  Epoch   4/5 | avg settled energy: 30.5629
+  Epoch   5/5 | avg settled energy: 28.3671
+  Task 2 energy after training:  27.4172
+  Task 2 done. Mean train energy over epochs: 35.1050
+  Task 1 -> Class-IL: 57.30% (NLL 1.902)
+  Task 2 -> Class-IL: 46.52% (NLL 1.983)
+  Task 3 -> Class-IL: 42.80% (NLL 1.880)
+  Task 4 -> Class-IL: 13.04% (NLL 2.019)
+  Task 5 -> Class-IL: 1.16% (NLL 2.282)
+
+--- Training Task 3 ---
+
+[PCNMethod] Task 3 | Class-IL | inference_steps=20 | eta_x=0.1 | eta_w=0.005
+  Task 3 energy before training: 37.8001
+  Epoch   1/5 | avg settled energy: 30.7099
+  Epoch   2/5 | avg settled energy: 27.3145
+  Epoch   3/5 | avg settled energy: 25.2770
+  Epoch   4/5 | avg settled energy: 23.7505
+  Epoch   5/5 | avg settled energy: 22.5408
+  Task 3 energy after training:  21.9906
+  Task 3 done. Mean train energy over epochs: 25.9185
+  Task 1 -> Class-IL: 56.26% (NLL 1.897)
+  Task 2 -> Class-IL: 26.05% (NLL 2.042)
+  Task 3 -> Class-IL: 57.95% (NLL 1.896)
+  Task 4 -> Class-IL: 31.37% (NLL 2.039)
+  Task 5 -> Class-IL: 2.98% (NLL 2.292)
+
+--- Training Task 4 ---
+
+[PCNMethod] Task 4 | Class-IL | inference_steps=20 | eta_x=0.1 | eta_w=0.005
+  Task 4 energy before training: 30.0412
+  Epoch   1/5 | avg settled energy: 25.4819
+  Epoch   2/5 | avg settled energy: 22.5800
+  Epoch   3/5 | avg settled energy: 20.7813
+  Epoch   4/5 | avg settled energy: 19.4764
+  Epoch   5/5 | avg settled energy: 18.4835
+  Task 4 energy after training:  18.1024
+  Task 4 done. Mean train energy over epochs: 21.3606
+  Task 1 -> Class-IL: 50.45% (NLL 1.904)
+  Task 2 -> Class-IL: 21.69% (NLL 2.010)
+  Task 3 -> Class-IL: 45.52% (NLL 1.918)
+  Task 4 -> Class-IL: 76.64% (NLL 1.721)
+  Task 5 -> Class-IL: 6.71% (NLL 2.151)
+
+--- Training Task 5 ---
+
+[PCNMethod] Task 5 | Class-IL | inference_steps=20 | eta_x=0.1 | eta_w=0.005
+  Task 5 energy before training: 23.2330
+  Epoch   1/5 | avg settled energy: 20.4307
+  Epoch   2/5 | avg settled energy: 19.0641
+  Epoch   3/5 | avg settled energy: 18.1941
+  Epoch   4/5 | avg settled energy: 17.4661
+  Epoch   5/5 | avg settled energy: 16.8679
+  Task 5 energy after training:  16.6041
+  Task 5 done. Mean train energy over epochs: 18.4046
+  Task 1 -> Class-IL: 63.36% (NLL 1.812)
+  Task 2 -> Class-IL: 32.37% (NLL 1.961)
+  Task 3 -> Class-IL: 45.89% (NLL 1.947)
+  Task 4 -> Class-IL: 79.10% (NLL 1.717)
+  Task 5 -> Class-IL: 45.54% (NLL 1.944)
+
+=== Task-IL run (BCE training / sigmoid evaluation) ===
+
+--- Training Task 1 ---
+
+[PCNMethod] Task 1 | Task-IL | inference_steps=20 | eta_x=0.1 | eta_w=0.005
+  Task 1 energy before training: 292.0548
+  Epoch   1/5 | avg settled energy: 56.4809
+  Epoch   2/5 | avg settled energy: 32.9535
+  Epoch   3/5 | avg settled energy: 27.7858
+  Epoch   4/5 | avg settled energy: 24.7596
+  Epoch   5/5 | avg settled energy: 22.6235
+  Task 1 energy after training:  21.7157
+  Task 1 done. Mean train energy over epochs: 32.9207
+  Task 1 -> Task-IL: 99.62% (NLL 0.069)
+  Task 2 -> Task-IL: 52.11% (NLL 0.710)
+  Task 3 -> Task-IL: 62.81% (NLL 0.651)
+  Task 4 -> Task-IL: 81.22% (NLL 0.592)
+  Task 5 -> Task-IL: 19.82% (NLL 0.843)
+
+--- Training Task 2 ---
+
+[PCNMethod] Task 2 | Task-IL | inference_steps=20 | eta_x=0.1 | eta_w=0.005
+  Task 2 energy before training: 59.8285
+  Epoch   1/5 | avg settled energy: 45.5309
+  Epoch   2/5 | avg settled energy: 37.6131
+  Epoch   3/5 | avg settled energy: 33.4509
+  Epoch   4/5 | avg settled energy: 30.5629
+  Epoch   5/5 | avg settled energy: 28.3671
+  Task 2 energy after training:  27.4172
+  Task 2 done. Mean train energy over epochs: 35.1050
+  Task 1 -> Task-IL: 99.67% (NLL 0.084)
+  Task 2 -> Task-IL: 95.00% (NLL 0.368)
+  Task 3 -> Task-IL: 58.64% (NLL 0.657)
+  Task 4 -> Task-IL: 77.59% (NLL 0.611)
+  Task 5 -> Task-IL: 20.57% (NLL 0.814)
+
+--- Training Task 3 ---
+
+[PCNMethod] Task 3 | Task-IL | inference_steps=20 | eta_x=0.1 | eta_w=0.005
+  Task 3 energy before training: 37.8001
+  Epoch   1/5 | avg settled energy: 30.7099
+  Epoch   2/5 | avg settled energy: 27.3145
+  Epoch   3/5 | avg settled energy: 25.2770
+  Epoch   4/5 | avg settled energy: 23.7505
+  Epoch   5/5 | avg settled energy: 22.5408
+  Task 3 energy after training:  21.9906
+  Task 3 done. Mean train energy over epochs: 25.9185
+  Task 1 -> Task-IL: 99.53% (NLL 0.120)
+  Task 2 -> Task-IL: 93.49% (NLL 0.403)
+  Task 3 -> Task-IL: 94.45% (NLL 0.409)
+  Task 4 -> Task-IL: 76.94% (NLL 0.622)
+  Task 5 -> Task-IL: 25.11% (NLL 0.802)
+
+--- Training Task 4 ---
+
+[PCNMethod] Task 4 | Task-IL | inference_steps=20 | eta_x=0.1 | eta_w=0.005
+  Task 4 energy before training: 30.0412
+  Epoch   1/5 | avg settled energy: 25.4819
+  Epoch   2/5 | avg settled energy: 22.5800
+  Epoch   3/5 | avg settled energy: 20.7813
+  Epoch   4/5 | avg settled energy: 19.4764
+  Epoch   5/5 | avg settled energy: 18.4835
+  Task 4 energy after training:  18.1024
+  Task 4 done. Mean train energy over epochs: 21.3606
+  Task 1 -> Task-IL: 99.48% (NLL 0.152)
+  Task 2 -> Task-IL: 94.32% (NLL 0.420)
+  Task 3 -> Task-IL: 92.05% (NLL 0.432)
+  Task 4 -> Task-IL: 97.83% (NLL 0.263)
+  Task 5 -> Task-IL: 22.74% (NLL 0.797)
+
+--- Training Task 5 ---
+
+[PCNMethod] Task 5 | Task-IL | inference_steps=20 | eta_x=0.1 | eta_w=0.005
+  Task 5 energy before training: 23.2330
+  Epoch   1/5 | avg settled energy: 20.4307
+  Epoch   2/5 | avg settled energy: 19.0641
+  Epoch   3/5 | avg settled energy: 18.1941
+  Epoch   4/5 | avg settled energy: 17.4661
+  Epoch   5/5 | avg settled energy: 16.8679
+  Task 5 energy after training:  16.6041
+  Task 5 done. Mean train energy over epochs: 18.4046
+  Task 1 -> Task-IL: 99.53% (NLL 0.178)
+  Task 2 -> Task-IL: 92.41% (NLL 0.437)
+  Task 3 -> Task-IL: 95.14% (NLL 0.439)
+  Task 4 -> Task-IL: 97.18% (NLL 0.273)
+  Task 5 -> Task-IL: 94.76% (NLL 0.494)
+
+=== pcn ===
+Task-IL  | ACC: 0.9580 | NLL: 0.3641 | BWT: -0.0066 | FWT: 0.0253 | Forgetting: 0.0085
+           NLL-space | BWT: -0.0547 | BWT(best): -0.0547 | FWT: 0.0111 | Forgetting: 0.0547
+           per-task NLL: 0.1781, 0.4374, 0.4391, 0.2726, 0.4935
+           BCE-NLL avg: 17.3421 | per-task: 14.5138, 21.4862, 17.6429, 17.9181, 15.1494
+Class-IL | ACC: 0.5325 | NLL: 1.8763 | BWT: -0.0779 | FWT: 0.1210 | Forgetting: 0.0841
+           NLL-space | BWT: -0.0409 | BWT(best): -0.0476 | FWT: 0.2986 | Forgetting: 0.0476
+           per-task NLL: 1.8124, 1.9606, 1.9472, 1.7168, 1.9444
+Logs saved in results/pcn
+Plots saved in results/pcn/plots

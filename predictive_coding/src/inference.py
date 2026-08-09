@@ -1,4 +1,4 @@
-
+import jax
 import jax.numpy as jnp
 
 from .utils import tanh ,dtanh
@@ -8,51 +8,33 @@ from functools import partial
 
 
 
+
+
+
+
 def init_states(params, X, Y, mode="zero"):
-    """
-    Initialize latent states for predictive-coding inference.
-
-    """
-
     batch_size = X.shape[0]
-
     states = {}
     states[0] = X
-
     num_states = len(params) + 1
 
     if mode == "zero":
-
-        for i in range(1, num_states):
-
+        for i in range(1, num_states - 1):          # only true latents: 1..num_states-2
             hidden_dim = params[i - 1]["w"].shape[1]
-
-            states[i] = jnp.zeros(
-                (batch_size, hidden_dim)
-            )
+            states[i] = jnp.zeros((batch_size, hidden_dim))
 
     elif mode == "bottom_up":
-
         current = X
-
-        for i in range(num_states - 1):
-
+        for i in range(num_states - 2):              # stop before the label layer
             W = params[i]["w"]
-
             current = tanh(current @ W)
-
             states[i + 1] = current
 
     else:
-        raise ValueError(
-            f"Unknown initialization mode: {mode}"
-        )
+        raise ValueError(f"Unknown initialization mode: {mode}")
 
-
-    states[num_states] = Y
-
+    states[num_states - 1] = Y                        # label goes in the real slot
     return states
-
 
 
 
@@ -111,8 +93,6 @@ def settle_states (params, X, Y, num_steps=50, eta_x=0.1, mode="zero"):
 
         x_i <- x_i - eta_x * dE/dx_i
 
-    Input and label layers remain clamped.
-
     Returns
     -------
     states
@@ -152,10 +132,10 @@ def settle_states (params, X, Y, num_steps=50, eta_x=0.1, mode="zero"):
                 - eta_x * grads[i]
             )
 
-        energy = compute_total_energy(
+        energy = jnp.mean(compute_total_energy(
             params,
             new_states,
-        )
+        ))
 
         energy_hist = energy_hist.at[
             step_idx
