@@ -5,10 +5,12 @@ from .utils import dtanh
 from .energy import compute_errors
 
 
+
+# compute the gradients of the energy with respect to the weights and biases 
+
 def compute_weight_gradients(params, states):
     """
     Analytical predictive-coding weight gradients.
-
     """
 
     errors = compute_errors(
@@ -52,6 +54,9 @@ def compute_weight_gradients(params, states):
 
     return grads
 
+
+
+# update the weights using gradient descent 
 def update_weights(
     params,
     grads,

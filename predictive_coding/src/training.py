@@ -1,4 +1,3 @@
-# predictive_coding/src/training.py
 import jax
 import jax.numpy as jnp
 from .inference import settle_states

@@ -11,7 +11,7 @@ from functools import partial
 
 
 
-
+# initialize the states at each layer 
 def init_states(params, X, Y, mode="zero"):
     batch_size = X.shape[0]
     states = {}
@@ -38,8 +38,7 @@ def init_states(params, X, Y, mode="zero"):
 
 
 
-
-
+# computes the gradient of the energy with respect to the state of each node 
 def compute_state_gradients(params, states):
     """
     Analytical predictive-coding state gradients.
@@ -76,11 +75,7 @@ def compute_state_gradients(params, states):
 
 
 
-
-
-
-
-
+# runs the process of setling the states 
 @partial(
     jax.jit,
     static_argnames=("num_steps", "eta_x", "mode")
@@ -113,7 +108,8 @@ def settle_states (params, X, Y, num_steps=50, eta_x=0.1, mode="zero"):
 
     num_states = len(params) + 1
 
-    def step_fn(step_idx, carry):
+    def step_fn(step_idx, carry): total_energy = 0.0
+
 
         states, energy_hist = carry
 
