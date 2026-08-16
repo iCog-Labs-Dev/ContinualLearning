@@ -1,7 +1,7 @@
 
 import jax.numpy as jnp
 
-from .utils import dtanh
+from .utils import get_activation
 from .energy import compute_errors
 
 
@@ -30,10 +30,11 @@ def compute_weight_gradients(params, states):
             upper_state @ layer["w"].T
             + layer["b"]
         )
+        _, d_act_fn = get_activation(layer.get("activation", "tanh"))
 
         delta = (
             errors[i]
-            * dtanh(pre_activation)
+            * d_act_fn(pre_activation)
         )
 
         dW = -(
@@ -57,11 +58,7 @@ def compute_weight_gradients(params, states):
 
 
 # update the weights using gradient descent 
-def update_weights(
-    params,
-    grads,
-    eta_w=1e-3,
-):
+def update_weights(params, grads, eta_w=1e-3):
     """
     Gradient-descent parameter update.
 
@@ -72,12 +69,16 @@ def update_weights(
     new_params = []
 
     for layer, grad in zip(params, grads):
-
-        new_params.append(
-            {
-                "w": layer["w"] - eta_w * grad["w"],
-                "b": layer["b"] - eta_w * grad["b"],
-            }
-        )
+        # Create a new dictionary or LayerParams preserving static keys
+        new_layer = dict(layer)
+        new_layer["w"] = layer["w"] - eta_w * grad["w"]
+        new_layer["b"] = layer["b"] - eta_w * grad["b"]
+        
+        # If it's a LayerParams, we need to return a LayerParams
+        if type(layer).__name__ == "LayerParams":
+            from .utils import LayerParams
+            new_params.append(LayerParams(new_layer))
+        else:
+            new_params.append(new_layer)
 
     return new_params

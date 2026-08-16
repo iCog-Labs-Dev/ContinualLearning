@@ -5,7 +5,6 @@ from .learning import (
     compute_weight_gradients,
     update_weights,
 )
-from .energy import compute_total_energy
 from functools import partial
 
 @partial(jax.jit, static_argnames=("eta_x", "eta_w", "inference_steps", "init_mode"))
@@ -47,13 +46,8 @@ def train_step(
         eta_w=eta_w,
     )
 
-    final_energy = jnp.mean(compute_total_energy(
-        params,
-        states,
-    ))
-
     metrics = {
-        "energy": final_energy,
+        "energy": energy_hist[-1],
         "final_inference_energy": energy_hist[-1],
         "energy_history": energy_hist,
     }

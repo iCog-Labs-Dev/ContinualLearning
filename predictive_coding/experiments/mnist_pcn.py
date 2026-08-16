@@ -62,7 +62,7 @@ def evaluate(pcn, params, X, Y_idx, batch_size=512):
     for start in range(0, n, batch_size):
         end = min(start + batch_size, n)
         xb = X[start:end]
-        logits = pcn.forward(params, xb)         
+        logits = pcn.forward(params, xb, inference_steps=40)         
         preds  = jnp.argmax(logits, axis=1)
         correct += int(jnp.sum(preds == Y_idx[start:end]))
     return correct / n
@@ -75,13 +75,13 @@ def main():
     print("  PCN MNIST Baseline")
     print("=" * 60)
 
-    #  Hypers
-    LAYER_SIZES      = [784, 256, 256, 10]
-    EPOCHS           = 30
-    BATCH_SIZE       = 256
+    #  Hyper  parameters 
+    LAYER_SIZES      = [784, 512, 512, 10]
+    EPOCHS           = 25
+    BATCH_SIZE       = 512
     ETA_X            = 0.1      # inference step
     ETA_W            = 0.005    # weight-learning step
-    INFERENCE_STEPS  = 20       # settle steps per batch
+    INFERENCE_STEPS  = 40       # settle steps per batch
     SEED             = 42
     EVAL_EVERY       = 5        # evaluate test acc every N epochs
 
@@ -107,8 +107,8 @@ def main():
 
 
     #  Training loop
-    print(f"{'Epoch':>6}  {'Train E':>10}  {'Train Acc':>10}  {'Test Acc':>10}  {'Time(s)':>8}")
-    print("-" * 56)
+    print(f"{'Epoch':>6}  {'Train E':>10}  {'Train Acc':>10}  {'Test Acc':>10}  {'Time(s)':>8}", flush=True)
+    print("-" * 56, flush=True)
 
     for epoch in range(EPOCHS):
         t0 = time.time()
@@ -139,7 +139,7 @@ def main():
             test_str = "        -"
 
         elapsed = time.time() - t0
-        print(f"{epoch:>6}  {avg_energy:>10.4f}  {train_acc * 100:>9.2f}%  {test_str}  {elapsed:>8.1f}s")
+        print(f"{epoch:>6}  {avg_energy:>10.4f}  {train_acc * 100:>9.2f}%  {test_str}  {elapsed:>8.1f}s", flush=True)
 
     # Final report
     print("\n" + "=" * 60)

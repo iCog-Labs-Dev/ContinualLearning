@@ -2,7 +2,7 @@
 import jax.numpy as jnp
 
 
-from .utils import tanh
+from .utils import get_activation
 
 
 # predicts the lower layer by using  the upper layer states and the wieghts connecting them to it
@@ -22,12 +22,12 @@ def predict_lower(params, states):
     for i, layer in enumerate(params):
 
         upper_state = states[i + 1]
+        act_fn, _ = get_activation(layer.get("activation", "tanh"))
 
-        predictions[i] = tanh(
+        predictions[i] = act_fn(
             upper_state @ layer["w"].T +
             layer["b"]
         )
-
 
     return predictions
 

@@ -10,27 +10,7 @@ from src.training import train_step
 from src.inference import settle_states
 from src.energy import predict_lower
 
-def generate_synthetic_data(num_samples=100, num_classes=10, feature_dim=784, seed=42):
-    """Generate perfectly separable synthetic data for overfitting test."""
-    key = jax.random.PRNGKey(seed)
-    
-    # Generate 10 orthogonal-ish prototypes
-    key_proto, key_noise = jax.random.split(key)
-    prototypes = jax.random.normal(key_proto, (num_classes, feature_dim))
-    prototypes = jnp.tanh(prototypes)  # bounds [-1, 1]
-    
-    # Assign classes
-    labels = jnp.tile(jnp.arange(num_classes), num_samples // num_classes)
-    
-    # Add noise
-    noise = 0.1 * jax.random.normal(key_noise, (num_samples, feature_dim))
-    data = prototypes[labels] + noise
-    data = jnp.tanh(data)
-    
-    # One-hot labels
-    labels_onehot = jax.nn.one_hot(labels, num_classes)
-    
-    return data, labels, labels_onehot
+from predictive_coding.experiments._shared import generate_synthetic_data
 
 def main():
     print("Running PCN Sanity Check...")
@@ -85,10 +65,12 @@ def main():
         
     #  Generative Check
     print("\n--- Testing Generative Pathway ---")
+    from src.utils import get_activation
     # Create states dict with just the labels
     gen_states = {3: jax.nn.one_hot(jnp.arange(10), 10)}
     for i in range(2, -1, -1):
-        gen_states[i] = jnp.tanh(gen_states[i+1] @ params[i]["w"].T + params[i]["b"])
+        act_fn, _ = get_activation(params[i].get("activation", "tanh"))
+        gen_states[i] = act_fn(gen_states[i+1] @ params[i]["w"].T + params[i]["b"])
         
     generated_X = gen_states[0]
     

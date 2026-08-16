@@ -1,0 +1,938 @@
+
+import jax.numpy as jnp
+
+
+from .utils import get_activation
+
+
+# predicts the lower layer by using  the upper layer states and the wieghts connecting them to it
+
+def predict_lower(params, states):
+    """
+    Generic top-down predictions.
+
+    params : list
+       
+        params[i] predicts state i from state i+1
+
+    """
+
+    predictions = {}
+
+    for i, layer in enumerate(params):
+
+        upper_state = states[i + 1]
+        act_fn, _ = get_activation(layer.get("activation", "tanh"))
+
+        predictions[i] = act_fn(
+            upper_state @ layer["w"].T +
+            layer["b"]
+        )
+
+    return predictions
+
+
+# compute the errors which is the differene between the predicted state and the actual state 
+
+def compute_errors(params, states):
+
+    """
+    Compute all prediction errors.
+
+    e_i = x_i - x̂_i
+    """
+
+    predictions = predict_lower(params, states)
+
+    errors = {}
+
+    for i in predictions:
+        errors[i] = states[i] - predictions[i]
+
+    return errors
+
+
+
+# calculates the total energy which is simply the sum of all the errors 
+def compute_total_energy(params, states):
+    """
+    E = 1/2 Σ ||e_i||²
+
+    Returns per-sample energy of shape (batch_size,).
+    """
+    
+    errors = compute_errors(params, states)
+
+    total_energy = 0.0
+
+    for e in errors.values():
+        total_energy += 0.5 * jnp.sum(
+            jnp.square(e),
+            axis=-1
+        )
+
+    return total_energyimport jax
+import jax.numpy as jnp
+
+from .utils import get_activation
+from .energy import compute_errors, compute_total_energy
+
+from functools import partial
+
+
+# initialize the states at each layer 
+def init_states(params, X, Y, mode="zero", clamped_indices=None):
+    num_states = len(params) + 1
+    if clamped_indices is None:
+        clamped_indices = frozenset({0, num_states - 1})
+
+    batch_size = X.shape[0]
+    states = {}
+    
+    if 0 in clamped_indices:
+        states[0] = X
+    if (num_states - 1) in clamped_indices:
+        states[num_states - 1] = Y
+
+    if mode == "zero":
+        for i in range(num_states):
+            if i not in clamped_indices:
+                if i == num_states - 1:
+                    states[i] = jnp.zeros_like(Y) if Y is not None else jnp.zeros((batch_size, params[-1]["w"].shape[1]))
+                elif i == 0:
+                    states[i] = jnp.zeros_like(X)
+                else:
+                    hidden_dim = params[i - 1]["w"].shape[1]
+                    states[i] = jnp.zeros((batch_size, hidden_dim))
+
+    elif mode == "bottom_up":
+        current = X if 0 in clamped_indices else jnp.zeros_like(X)
+        if 0 not in clamped_indices:
+            states[0] = current
+
+        for i in range(num_states - 1):
+            W = params[i]["w"]
+            act_fn, _ = get_activation(params[i].get("activation", "tanh"))
+            current = act_fn(current @ W)
+            if (i + 1) not in clamped_indices:
+                states[i + 1] = current
+
+    return states
+
+
+# computes the gradient of the energy with respect to the state of each node 
+def compute_state_gradients(params, states, clamped_indices=None):
+    """
+    Analytical predictive-coding state gradients.
+    """
+    num_states = len(params) + 1
+    if clamped_indices is None:
+        clamped_indices = frozenset({0, num_states - 1})
+
+    errors = compute_errors(params, states)
+    grads = {}
+
+    for i in range(num_states):
+        if i in clamped_indices:
+            continue
+
+        grad = errors[i] if i in errors else 0.0
+
+        if i > 0:
+            W_lower = params[i - 1]["w"]
+            b_lower = params[i - 1]["b"]
+
+            pre_activation = (
+                states[i] @ W_lower.T
+                + b_lower
+            )
+            _, d_act_fn = get_activation(params[i - 1].get("activation", "tanh"))
+
+            feedback = (
+                errors[i - 1]
+                * d_act_fn(pre_activation)
+            ) @ W_lower
+
+            grad = grad - feedback
+
+        grads[i] = grad
+
+    return grads
+
+
+# runs the process of setling the states 
+@partial(
+    jax.jit,
+    static_argnames=("num_steps", "eta_x", "mode", "clamped_indices")
+)
+def settle_states(params, X, Y, num_steps=50, eta_x=0.1, mode="zero", clamped_indices=None):
+    """
+    Iterative predictive-coding inference.
+    """
+    num_states = len(params) + 1
+    if clamped_indices is None:
+        clamped_indices = frozenset({0, num_states - 1})
+
+    states = init_states(params, X, Y, mode=mode, clamped_indices=clamped_indices)
+    energy_hist = jnp.zeros((num_steps,))
+
+    def step_fn(step_idx, carry):
+        states, energy_hist = carry
+        grads = compute_state_gradients(params, states, clamped_indices=clamped_indices)
+    
+        new_states = dict(states)
+        for i in range(num_states):
+            if i not in clamped_indices:
+                new_states[i] = states[i] - eta_x * grads[i]
+
+        energy = jnp.mean(compute_total_energy(params, new_states))
+        energy_hist = energy_hist.at[step_idx].set(energy)
+        return new_states, energy_hist
+
+    states, energy_hist = jax.lax.fori_loop(0, num_steps, step_fn, (states, energy_hist))
+    return states, energy_hist
+
+
+import jax.numpy as jnp
+
+from .utils import get_activation
+from .energy import compute_errors
+
+
+
+# compute the gradients of the energy with respect to the weights and biases 
+
+def compute_weight_gradients(params, states):
+    """
+    Analytical predictive-coding weight gradients.
+    """
+
+    errors = compute_errors(
+        params,
+        states,
+    )
+
+    batch_size = states[0].shape[0]
+
+    grads = []
+
+    for i, layer in enumerate(params):
+
+        upper_state = states[i + 1]
+
+        pre_activation = (
+            upper_state @ layer["w"].T
+            + layer["b"]
+        )
+        _, d_act_fn = get_activation(layer.get("activation", "tanh"))
+
+        delta = (
+            errors[i]
+            * d_act_fn(pre_activation)
+        )
+
+        dW = -(
+            delta.T @ upper_state
+        ) / batch_size
+
+        db = -jnp.mean(
+            delta,
+            axis=0,
+        )
+
+        grads.append(
+            {
+                "w": dW,
+                "b": db,
+            }
+        )
+
+    return grads
+
+
+
+# update the weights using gradient descent 
+def update_weights(params, grads, eta_w=1e-3):
+    """
+    Gradient-descent parameter update.
+
+    W <- W - eta_w * dW
+    b <- b - eta_w * db
+    """
+
+    new_params = []
+
+    for layer, grad in zip(params, grads):
+        # Create a new dictionary or LayerParams preserving static keys
+        new_layer = dict(layer)
+        new_layer["w"] = layer["w"] - eta_w * grad["w"]
+        new_layer["b"] = layer["b"] - eta_w * grad["b"]
+        
+        # If it's a LayerParams, we need to return a LayerParams
+        if type(layer).__name__ == "LayerParams":
+            from .utils import LayerParams
+            new_params.append(LayerParams(new_layer))
+        else:
+            new_params.append(new_layer)
+
+    return new_params"""
+PCNMethod — benchmark adapter for the Generative Predictive Coding Network.
+
+This class integrates a purely generative Predictive Coding Network (PCN)
+with the continual-learning benchmark framework. It exposes the standard
+`train_task(...)` interface while preserving the PCN training procedure:
+iterative state inference followed by local prediction-error-driven weight
+updates.
+
+The benchmark data is automatically rescaled from [0,1] to [-1,1] to match
+the tanh-based PCN formulation, and integer labels are converted to one-hot
+targets. No replay buffer, regularisation, or task-specific memory is used;
+the model is trained sequentially on tasks using only predictive-coding
+dynamics.
+
+
+"""
+
+from __future__ import annotations
+
+import jax
+import jax.numpy as jnp
+
+from predictive_coding.src.training import train_step
+from predictive_coding.src.inference import settle_states
+from predictive_coding.src.energy import compute_total_energy
+from core.data import Task
+
+from functools import partial
+
+@partial(jax.jit, static_argnames=("eta_x", "inference_steps"))
+def compute_energy_batch(params, X, Y, eta_x, inference_steps):
+    states, _ = settle_states(
+        params, X, Y, num_steps=inference_steps, eta_x=eta_x, mode="bottom_up"
+    )
+    return jnp.mean(compute_total_energy(params, states))
+
+
+class PCNMethod:
+    """Benchmark adapter for a purely generative Predictive Coding Network.
+
+    Parameters
+    ----------
+    layer_sizes:
+        Architecture
+    eta_x:
+        Inference (state-settling) learning rate.
+    eta_w:
+        Weight learning rate.
+    inference_steps:
+        Number of settling steps per training batch. Passed through from
+        ``SuiteConfig.inference_steps`` so it can be controlled via CLI
+        without touching code.
+    batch_size:
+        Mini-batch size.
+    epochs:
+        Training epochs per task.
+    seed:
+        Base PRNG seed. Per-task and per-epoch keys are derived from this.
+    """
+
+    def __init__(
+        self,
+        layer_sizes: list[int],
+        eta_x: float,
+        eta_w: float,
+        inference_steps: int,
+        batch_size: int,
+        epochs: int,
+        seed: int,
+    ):
+        self.layer_sizes = layer_sizes
+        self.eta_x = eta_x
+        self.eta_w = eta_w
+        self.inference_steps = inference_steps
+        self.batch_size = batch_size
+        self.epochs = epochs
+        self.seed = seed
+        
+        self.task_il_training = False
+
+    # Benchmark interface
+  
+
+    def train_task(self, model, params, state, task: Task, task_idx: int):
+        """Train on one task sequentially """
+
+
+        protocol = "Task-IL" if self.task_il_training else "Class-IL"
+        print(
+            f"\n[PCNMethod] Task {task_idx + 1} | {protocol} | "
+            f"inference_steps={self.inference_steps} | "
+            f"eta_x={self.eta_x} | eta_w={self.eta_w}"
+        )
+
+        # rescale: benchmark data is [0,1]; PCN was validated on [-1,1]
+        X_train = task.train_X * 2.0 - 1.0          # shape: (N, 784)
+
+        # one-hot encode integer labels 
+        num_classes = self.layer_sizes[-1]           # typically 10
+        Y_oh = jax.nn.one_hot(task.train_y, num_classes)  # (N, 10)
+
+        n = X_train.shape[0]
+        num_batches = (n + self.batch_size - 1) // self.batch_size
+        
+
+        # Derive a per-task base key so tasks don't share shuffle state.
+        base_key = jax.random.fold_in(
+            jax.random.PRNGKey(self.seed), task_idx
+        )
+
+        # Energy before training this task
+        energy_before = 0.0
+        for b in range(num_batches):
+            start = b * self.batch_size
+            end = min(start + self.batch_size, n)
+            energy_before += float(compute_energy_batch(
+                params, X_train[start:end], Y_oh[start:end], self.eta_x, self.inference_steps
+            ))
+        energy_before /= num_batches
+        print(f"  Task {task_idx + 1} energy before training: {energy_before:.4f}")
+
+        total_energy = 0.0
+
+        for ep in range(self.epochs):
+            ep_key = jax.random.fold_in(base_key, ep)
+
+            # Shuffle
+            perm = jax.random.permutation(ep_key, n)
+            X_ep = X_train[perm]
+            Y_ep = Y_oh[perm]
+
+            ep_energy = 0.0
+            for b in range(num_batches):
+                start = b * self.batch_size
+                end = min(start + self.batch_size, n)
+                X_b = X_ep[start:end]
+                Y_b = Y_ep[start:end]
+
+                params, metrics = train_step(
+                    params,
+                    X_b,
+                    Y_b,
+                    eta_x=self.eta_x,
+                    eta_w=self.eta_w,
+                    inference_steps=self.inference_steps,
+                    init_mode="bottom_up",
+                )
+                ep_energy += float(metrics["energy"])
+
+            avg_ep_energy = ep_energy / num_batches
+            total_energy += avg_ep_energy
+
+            print(
+                f"  Epoch {ep + 1:>3}/{self.epochs} | "
+                f"avg settled energy: {avg_ep_energy:.4f}"
+            )
+
+        # Energy after training this task
+        energy_after = 0.0
+        for b in range(num_batches):
+            start = b * self.batch_size
+            end = min(start + self.batch_size, n)
+            energy_after += float(compute_energy_batch(
+                params, X_train[start:end], Y_oh[start:end], self.eta_x, self.inference_steps
+            ))
+        energy_after /= num_batches
+        print(f"  Task {task_idx + 1} energy after training:  {energy_after:.4f}")
+
+        avg_energy = total_energy / self.epochs
+        print(f"  Task {task_idx + 1} done. Mean train energy over epochs: {avg_energy:.4f}")
+        return params, None, avg_energy
+
+
+import jax
+import jax.numpy as jnp
+
+from .utils import tanh, init_pcn_params
+from .inference import settle_states
+from .energy import compute_total_energy
+
+
+class GenerativePCN:
+    """
+    Purely generative Predictive Coding Network.
+
+    """
+
+    def __init__(self, layer_sizes=None):
+        if layer_sizes is None:
+            layer_sizes = [784, 256, 256, 10]
+
+        self.layer_sizes = layer_sizes
+
+    def init_params(self, key):
+        """
+        Initialize all generative weights.
+
+        Returns:
+            params: list of layer parameter dictionaries
+        """
+        return init_pcn_params(key, self.layer_sizes)
+
+    def forward(self, params, X, candidate_classes=jnp.arange(10), rescale=False, inference_steps=40):
+        """Evaluate candidate classes and return negative energy as pseudo-logits.
+
+        Parameters
+        ----------
+        params:
+            Generative parameters (list of ``{"w", "b"}`` dicts).
+        X:
+            Input batch. Shape ``(batch_size, input_dim)``.
+        candidate_classes:
+            Which output classes to score. Defaults to all 10 MNIST digits.
+        rescale:
+            If ``True``, rescale ``X`` from ``[0, 1]`` to ``[-1, 1]`` before
+            settling. Set this when ``X`` comes from the shared benchmark data
+            pipeline (``core/data.py`` which normalises to ``[0, 1]``). Leave
+            ``False`` when ``X`` is already in ``[-1, 1]`` (e.g. the standalone
+            MNIST experiment).
+        """
+        if rescale:
+            X = X * 2.0 - 1.0
+
+        def evaluate_single_class(c):
+            Y_c = jax.nn.one_hot(jnp.full((X.shape[0],), c), 10)
+            states, _ = settle_states(params, X, Y_c, mode="bottom_up", num_steps=inference_steps)
+            return -compute_total_energy(params, states)
+
+        # vmap over classes
+        pseudo_logits = jax.vmap(evaluate_single_class)(candidate_classes)
+        return pseudo_logits.T  # Shape: (batch_size, num_classes)"""Thin wrapper that bakes rescale=True into GenerativePCN.forward().
+The benchmark ``Evaluator`` calls::
+
+    logits = model.forward(params, task.test_X)
+``task.test_X`` comes from ``core/data.py`` normalised to ``[0, 1]``. The PCN needs ``[-1, 1]``.
+
+so  we made t
+``forward(params, X)`` automatically applies ``X = X * 2 - 1`` 
+
+
+from __future__ import annotations
+
+import jax.numpy as jnp
+
+
+
+
+class PCNModelWrapper:
+    """W
+    wraps ``GenerativePCN`` with ``rescale=True`` baked into ``forward()``.
+
+    """
+
+    def __init__(self, pcn):
+        self._pcn = pcn
+
+    # Delegate attribute access to the underlying model 
+    def __getattr__(self, name):
+        return getattr(self._pcn, name)
+
+    def forward(self, params, X, candidate_classes=jnp.arange(10)):
+        """Forward pass with automatic ``[0,1] -> [-1,1]`` rescaling."""
+        return self._pcn.forward(
+            params, X, candidate_classes=candidate_classes, rescale=True
+        )
+import jax
+import jax.numpy as jnp
+from .inference import settle_states
+from .learning import (
+    compute_weight_gradients,
+    update_weights,
+)
+from functools import partial
+
+@partial(jax.jit, static_argnames=("eta_x", "eta_w", "inference_steps", "init_mode"))
+def train_step(
+    params,
+    X,
+    Y,
+    eta_x=0.1,
+    eta_w=1e-3,
+    inference_steps=50,
+    init_mode="bottom_up",
+):
+    """
+    One predictive-coding training step.
+
+    Returns
+    -------
+    new_params
+    metrics
+    """
+
+    states, energy_hist = settle_states(
+        params,
+        X,
+        Y,
+        num_steps=inference_steps,
+        eta_x=eta_x,
+        mode=init_mode,
+    )
+
+    grads = compute_weight_gradients(
+        params,
+        states,
+    )
+
+    new_params = update_weights(
+        params,
+        grads,
+        eta_w=eta_w,
+    )
+
+    metrics = {
+        "energy": energy_hist[-1],
+        "final_inference_energy": energy_hist[-1],
+        "energy_history": energy_hist,
+    }
+
+    return new_params, metrics
+
+import jax
+import jax.numpy as jnp
+
+
+# Activations
+
+def tanh(x):
+    """Analytical tanh activation."""
+    return jnp.tanh(x)
+
+
+def dtanh(x):
+    """
+    Analytical derivative of tanh.
+
+    d/dx tanh(x) = 1 - tanh(x)^2
+    """
+    t = jnp.tanh(x)
+    return 1.0 - t * t
+
+
+# Activation Registry
+
+def linear(x):
+    return x
+
+def dlinear(x):
+    return jnp.ones_like(x)
+
+ACTIVATIONS = {
+    "tanh": (tanh, dtanh),
+    "linear": (linear, dlinear),
+}
+
+def get_activation(name):
+    if name not in ACTIVATIONS:
+        raise ValueError(f"Unknown activation: {name}")
+    return ACTIVATIONS[name]
+
+
+# Parameter Initialization
+
+@jax.tree_util.register_pytree_node_class
+class LayerParams(dict):
+    """A dictionary that registers as a JAX PyTree, keeping 'w' and 'b' dynamic and other keys static."""
+    def tree_flatten(self):
+        dynamic = {k: v for k, v in self.items() if k in ("w", "b")}
+        # Return tuple of items to make it hashable
+        static = tuple(sorted((k, v) for k, v in self.items() if k not in ("w", "b")))
+        return ((dynamic,), static)
+
+    @classmethod
+    def tree_unflatten(cls, aux_data, children):
+        d = cls()
+        d.update(children[0])
+        d.update(dict(aux_data))
+        return d
+
+def xavier_init(key, fan_in, fan_out):
+    """
+    Xavier/Glorot initialization.
+
+    Returns:
+        W: (fan_out, fan_in)
+    """
+    limit = jnp.sqrt(6.0 / (fan_in + fan_out))
+    return jax.random.uniform(
+        key,
+        shape=(fan_out, fan_in),
+        minval=-limit,
+        maxval=limit,
+    )
+
+
+def init_layer_params(key, fan_in, fan_out, activation="tanh"):
+    """
+    Initialize one generative layer.
+
+    Generative mapping:
+        x_{i+1} -> x_i
+
+    Weight shape:
+        (fan_out, fan_in)
+
+    Prediction:
+        x_hat_i = act(x_{i+1} @ W.T + b)
+    """
+    w_key, b_key = jax.random.split(key)
+
+    W = xavier_init(w_key, fan_in, fan_out)
+
+    b = jnp.zeros((fan_out,))
+
+    return LayerParams({
+        "w": W,
+        "b": b,
+        "activation": activation,
+    })
+
+
+
+def init_pcn_params(key, layer_sizes):
+    """
+    Create all generative parameters.
+    """
+
+    keys = jax.random.split(key, len(layer_sizes) - 1)
+
+    params = []
+
+    for k, (lower_dim, upper_dim) in zip(
+        keys,
+        zip(layer_sizes[:-1], layer_sizes[1:])
+    ):
+        params.append(
+            init_layer_params(
+                k,
+                fan_in=upper_dim,
+                fan_out=lower_dim,
+            )
+        )
+
+    return params"""
+    Run the PCN on Split-MNIST through the continual-learning benchmark.
+"""
+
+import sys
+import os
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
+
+import jax
+
+from core.data import load_mnist, split_into_tasks
+from benchmarker import CLBenchmark
+from src.model import GenerativePCN
+from src.method import PCNMethod
+from src.pcn_wrapper import PCNModelWrapper
+
+
+
+# Config 
+LAYER_SIZES =[784, 512, 512, 10]
+SEED = 0
+BATCH_SIZE = 128
+EPOCHS = 25
+ETA_X = 0.1
+ETA_W = 0.005
+INFERENCE_STEPS = 40
+CLASS_PAIRS = [[0, 1], [2, 3], [4, 5], [6, 7], [8, 9]]
+
+
+
+#  Data 
+X, y, test_X, test_y = load_mnist()
+tasks = split_into_tasks(X, y, test_X, test_y, CLASS_PAIRS)
+
+pcn = GenerativePCN(LAYER_SIZES)
+params = pcn.init_params(jax.random.PRNGKey(SEED))
+
+model = PCNModelWrapper(pcn)
+
+method = PCNMethod(
+    layer_sizes=LAYER_SIZES,
+    eta_x=ETA_X,
+    eta_w=ETA_W,
+    inference_steps=INFERENCE_STEPS,
+    batch_size=BATCH_SIZE,
+    epochs=EPOCHS,
+    seed=SEED,
+)
+
+# Run
+CLBenchmark(method=method, model=model, tasks=tasks, name="pcn").run(params, None)
+"""
+MNIST Baseline Experiment
+
+Train the generative PCN on full MNIST (all 10 classes, no task splits).
+"""
+
+import os
+import sys
+import time
+
+import jax
+import jax.numpy as jnp
+import numpy as np
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+from src.model import GenerativePCN
+from src.training import train_step
+
+
+
+def load_mnist():
+    """Load and preprocess MNIST via Keras. Returns JAX arrays."""
+    # suppress TF/Keras logging
+    os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
+    import keras
+
+    (x_train, y_train), (x_test, y_test) = keras.datasets.mnist.load_data()
+
+    # Flatten and normalise to [-1, 1]
+    x_train = x_train.reshape(-1, 784).astype(np.float32) / 127.5 - 1.0
+    x_test  = x_test.reshape(-1, 784).astype(np.float32) / 127.5 - 1.0
+
+    y_train_oh = np.eye(10, dtype=np.float32)[y_train]
+    y_test_oh  = np.eye(10, dtype=np.float32)[y_test]
+
+    return (
+        jnp.array(x_train), jnp.array(y_train), jnp.array(y_train_oh),
+        jnp.array(x_test),  jnp.array(y_test),  jnp.array(y_test_oh),
+    )
+
+
+# batching 
+
+def make_batches(X, Y, Y_idx, batch_size, key):
+    """Shuffle and yield (x_batch, y_oh_batch, y_idx_batch) tuples."""
+    n = X.shape[0]
+    perm = jax.random.permutation(key, n)
+    X, Y, Y_idx = X[perm], Y[perm], Y_idx[perm]
+    for start in range(0, n, batch_size):
+        end = min(start + batch_size, n)
+        yield X[start:end], Y[start:end], Y_idx[start:end]
+
+
+
+# evaluation
+
+def evaluate(pcn, params, X, Y_idx, batch_size=512):
+    """Compute accuracy by running pcn.forward on mini-batches."""
+    n = X.shape[0]
+    correct = 0
+    for start in range(0, n, batch_size):
+        end = min(start + batch_size, n)
+        xb = X[start:end]
+        logits = pcn.forward(params, xb, inference_steps=40)         
+        preds  = jnp.argmax(logits, axis=1)
+        correct += int(jnp.sum(preds == Y_idx[start:end]))
+    return correct / n
+
+
+# main
+
+def main():
+    print("=" * 60)
+    print("  PCN MNIST Baseline")
+    print("=" * 60)
+
+    #  Hyper  parameters 
+    LAYER_SIZES      = [784, 512, 512, 10]
+    EPOCHS           = 25
+    BATCH_SIZE       = 512
+    ETA_X            = 0.1      # inference step
+    ETA_W            = 0.005    # weight-learning step
+    INFERENCE_STEPS  = 40       # settle steps per batch
+    SEED             = 42
+    EVAL_EVERY       = 5        # evaluate test acc every N epochs
+
+    print(f"\n  Architecture : {LAYER_SIZES}")
+    print(f"  Epochs       : {EPOCHS}")
+    print(f"  Batch size   : {BATCH_SIZE}")
+    print(f"  eta_x        : {ETA_X}")
+    print(f"  eta_w        : {ETA_W}")
+    print(f"  Inf. steps   : {INFERENCE_STEPS}")
+    print()
+
+    #  Data 
+    print("Loading MNIST...")
+    x_train, y_train, y_train_oh, x_test, y_test, y_test_oh = load_mnist()
+    print(f"  Train: {x_train.shape}  Test: {x_test.shape}\n")
+
+    # Model
+    pcn    = GenerativePCN(layer_sizes=LAYER_SIZES)
+    key    = jax.random.PRNGKey(SEED)
+    params = pcn.init_params(key)
+
+    num_batches = int(np.ceil(x_train.shape[0] / BATCH_SIZE))
+
+
+    #  Training loop
+    print(f"{'Epoch':>6}  {'Train E':>10}  {'Train Acc':>10}  {'Test Acc':>10}  {'Time(s)':>8}", flush=True)
+    print("-" * 56, flush=True)
+
+    for epoch in range(EPOCHS):
+        t0 = time.time()
+        key, subkey = jax.random.split(key)
+
+        epoch_energy = 0.0
+        for xb, yb, _ in make_batches(x_train, y_train_oh, y_train, BATCH_SIZE, subkey):
+            params, metrics = train_step(
+                params, xb, yb,
+                eta_x=ETA_X,
+                eta_w=ETA_W,
+                inference_steps=INFERENCE_STEPS,
+                init_mode="bottom_up",
+            )
+            epoch_energy += float(metrics["energy"])
+
+        avg_energy = epoch_energy / num_batches
+
+        # Acuracy ─
+        # Train accuracy: one pass over the full training set
+        train_acc = evaluate(pcn, params, x_train, y_train, batch_size=512)
+
+        # Test accuracy: every EVAL_EVERY epochs
+        if (epoch + 1) % EVAL_EVERY == 0 or epoch == 0 or epoch == EPOCHS - 1:
+            test_acc = evaluate(pcn, params, x_test, y_test, batch_size=512)
+            test_str = f"{test_acc * 100:>9.2f}%"
+        else:
+            test_str = "        -"
+
+        elapsed = time.time() - t0
+        print(f"{epoch:>6}  {avg_energy:>10.4f}  {train_acc * 100:>9.2f}%  {test_str}  {elapsed:>8.1f}s", flush=True)
+
+    # Final report
+    print("\n" + "=" * 60)
+    final_train = evaluate(pcn, params, x_train, y_train, batch_size=512)
+    final_test  = evaluate(pcn, params, x_test,  y_test,  batch_size=512)
+    print(f"  Final Train Accuracy : {final_train * 100:.2f}%")
+    print(f"  Final Test  Accuracy : {final_test  * 100:.2f}%")
+    print("=" * 60)
+
+    if final_test < 0.50:
+        print("\n  [WARN] Test accuracy < 50% — model may not have learned.")
+        print("         Check energy descent and try more epochs / larger net.")
+    elif final_test < 0.80:
+        print("\n  [OK]   Model is learning but not yet competitive.")
+        print("         Consider more inference steps or a deeper architecture.")
+    else:
+        print("\n  [PASS] Reasonable MNIST accuracy — ready for Split-MNIST.")
+
+
+if __name__ == "__main__":
+    main()
+

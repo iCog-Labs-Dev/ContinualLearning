@@ -4,7 +4,8 @@ import jax
 import jax.numpy as jnp
 
 from .utils import tanh, init_pcn_params
-
+from .inference import settle_states
+from .energy import compute_total_energy
 
 
 class GenerativePCN:
@@ -28,7 +29,7 @@ class GenerativePCN:
         """
         return init_pcn_params(key, self.layer_sizes)
 
-    def forward(self, params, X, candidate_classes=jnp.arange(10), rescale=False):
+    def forward(self, params, X, candidate_classes=jnp.arange(10), rescale=False, inference_steps=40):
         """Evaluate candidate classes and return negative energy as pseudo-logits.
 
         Parameters
@@ -46,15 +47,12 @@ class GenerativePCN:
             ``False`` when ``X`` is already in ``[-1, 1]`` (e.g. the standalone
             MNIST experiment).
         """
-        from .inference import settle_states
-        from .energy import compute_total_energy
-
         if rescale:
             X = X * 2.0 - 1.0
 
         def evaluate_single_class(c):
             Y_c = jax.nn.one_hot(jnp.full((X.shape[0],), c), 10)
-            states, _ = settle_states(params, X, Y_c, mode="bottom_up")
+            states, _ = settle_states(params, X, Y_c, mode="bottom_up", num_steps=inference_steps)
             return -compute_total_energy(params, states)
 
         # vmap over classes
