@@ -72,8 +72,13 @@ def update_weights(params, grads, eta_w=1e-3):
         # Create a new dictionary or LayerParams preserving static keys
         new_layer = dict(layer)
         new_layer["w"] = layer["w"] - eta_w * grad["w"]
-        new_layer["b"] = layer["b"] - eta_w * grad["b"]
-        
+
+        # Freeze bias when use_bias=False (zeros, never updated)
+        if layer.get("use_bias", True):
+            new_layer["b"] = layer["b"] - eta_w * grad["b"]
+        else:
+            new_layer["b"] = layer["b"]
+
         # If it's a LayerParams, we need to return a LayerParams
         if type(layer).__name__ == "LayerParams":
             from .utils import LayerParams

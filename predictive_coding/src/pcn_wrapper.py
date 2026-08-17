@@ -32,3 +32,16 @@ class PCNModelWrapper:
         return self._pcn.forward(
             params, X, candidate_classes=candidate_classes, rescale=True
         )
+
+
+class PCNModelWrapperXL(PCNModelWrapper):
+    """Like ``PCNModelWrapper`` but uses ``forward_xl`` for evaluation.
+
+    ``forward()`` runs a **single** inference pass (clamp X, free top layer)
+    and returns the settled top-layer state as logits.
+    Cost: ``1 × B × T_infer`` vs ``num_classes × B × T_infer``.
+    """
+
+    def forward(self, params, X, **_kwargs):
+        """Single-pass forward with automatic ``[0,1] -> [-1,1]`` rescaling."""
+        return self._pcn.forward_xl(params, X, rescale=True)

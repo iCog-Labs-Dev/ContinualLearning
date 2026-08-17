@@ -1,0 +1,55 @@
+============================================================
+  PCN MNIST Baseline — forward_xl (single-pass top-layer)
+============================================================
+
+  Architecture : [784, 512, 512, 10]
+  Epochs       : 25
+  Batch size   : 512
+  eta_x        : 0.1
+  eta_w        : 0.005
+  Inf. steps   : 40
+  Evaluation   : forward_xl (1 pass, free top layer)
+
+Loading MNIST...
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+I0000 00:00:1786966310.730372   31349 port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+I0000 00:00:1786966310.730846   31349 cudart_stub.cc:31] Could not find cuda drivers on your machine, GPU will not be used.
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+I0000 00:00:1786966311.686140   31349 port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+I0000 00:00:1786966311.686417   31349 cudart_stub.cc:31] Could not find cuda drivers on your machine, GPU will not be used.
+  Train: (60000, 784)  Test: (10000, 784)
+
+ Epoch     Train E   Train Acc    Test Acc   Time(s)
+--------------------------------------------------------
+     0     55.3489      39.16%      39.28%      90.7s
+     1     35.0516      52.78%          -      79.6s
+     2     29.5208      57.75%          -      78.2s
+     3     26.2650      60.26%          -      76.7s
+     4     24.0017      62.48%      63.89%      83.2s
+     5     22.2769      64.83%          -      78.3s
+     6     20.8946      66.28%          -      76.9s
+     7     19.7402      67.80%          -      76.5s
+     8     18.7628      69.03%          -      76.8s
+     9     17.9060      70.11%      71.79%      83.1s
+    10     17.1538      71.07%          -      74.6s
+    11     16.4967      72.00%          -      74.0s
+    12     15.9066      73.11%          -      74.6s
+    13     15.3868      73.96%          -      76.8s
+    14     14.9152      74.30%      75.70%      82.9s
+    15     14.4745      74.66%          -      76.5s
+    16     14.0859      74.99%          -      76.8s
+    17     13.7232      75.10%          -      74.2s
+    18     13.3827      75.28%          -      74.7s
+    19     13.0727      75.48%      76.46%      82.7s
+    20     12.7752      75.56%          -      76.8s
+    21     12.5043      75.68%          -      76.6s
+    22     12.2523      75.77%          -      77.2s
+    23     12.0068      75.79%          -      77.0s
+    24     11.7818      75.82%      76.83%      83.3s
+
+============================================================
+  Final Train Accuracy : 75.82%
+  Final Test  Accuracy : 76.83%
+============================================================
+
+  [OK]   Model is learning but not yet competitive.
