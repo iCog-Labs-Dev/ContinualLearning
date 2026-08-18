@@ -26,10 +26,10 @@ from src.pcn_wrapper import PCNModelWrapperXL
 LAYER_SIZES     = [784, 512, 512, 10]
 SEED            = 0
 BATCH_SIZE      = 128
-EPOCHS          = 25
+EPOCHS          = 35
 ETA_X           = 0.1
 ETA_W           = 0.005
-INFERENCE_STEPS = 40
+INFERENCE_STEPS = 50
 CLASS_PAIRS     = [[0, 1], [2, 3], [4, 5], [6, 7], [8, 9]]
 
 print("PCN Benchmark — forward_xl (single-pass top-layer readout)")

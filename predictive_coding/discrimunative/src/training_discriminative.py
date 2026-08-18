@@ -1,14 +1,14 @@
 import jax
 import jax.numpy as jnp
-from .inference import settle_states
-from .learning import (
-    compute_weight_gradients,
-    update_weights,
-)
 from functools import partial
 
+from .inference_discriminative import settle_states_discriminative
+from .learning_discriminative import compute_weight_gradients_discriminative
+from generative.src.learning import update_weights
+
+
 @partial(jax.jit, static_argnames=("eta_x", "eta_w", "inference_steps", "init_mode"))
-def train_step(
+def train_step_discriminative(
     params,
     X,
     Y,
@@ -18,24 +18,29 @@ def train_step(
     init_mode="bottom_up",
 ):
     """
-    One predictive-coding training step.
+    One discriminative-PC training step.
+
+    Clamps {0, L} — input and label — exactly like generative training.
 
     Returns
     -------
     new_params
     metrics
     """
+    num_states = len(params) + 1
+    clamped_indices = frozenset({0, num_states - 1})
 
-    states, energy_hist = settle_states(
+    states, energy_hist = settle_states_discriminative(
         params,
         X,
         Y,
         num_steps=inference_steps,
         eta_x=eta_x,
         mode=init_mode,
+        clamped_indices=clamped_indices,
     )
 
-    grads = compute_weight_gradients(
+    grads = compute_weight_gradients_discriminative(
         params,
         states,
     )
@@ -48,7 +53,6 @@ def train_step(
 
     metrics = {
         "energy": energy_hist[-1],
-        "final_inference_energy": energy_hist[-1],
         "energy_history": energy_hist,
     }
 
