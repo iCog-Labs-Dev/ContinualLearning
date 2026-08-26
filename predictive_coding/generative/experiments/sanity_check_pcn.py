@@ -10,7 +10,7 @@ from src.training import train_step
 from src.inference import settle_states
 from src.energy import predict_lower
 
-from predictive_coding.experiments._shared import generate_synthetic_data
+from _shared import generate_synthetic_data
 
 def main():
     print("Running PCN Sanity Check...")

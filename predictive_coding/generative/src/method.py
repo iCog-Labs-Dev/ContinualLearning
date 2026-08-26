@@ -21,9 +21,9 @@ from __future__ import annotations
 import jax
 import jax.numpy as jnp
 
-from predictive_coding.src.training import train_step
-from predictive_coding.src.inference import settle_states
-from predictive_coding.src.energy import compute_total_energy
+from .training import train_step
+from .inference import settle_states
+from .energy import compute_total_energy
 from core.data import Task
 
 from functools import partial
