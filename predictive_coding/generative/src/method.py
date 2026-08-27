@@ -86,7 +86,7 @@ class PCNMethod:
         """Train on one task sequentially """
 
 
-        protocol = "Task-IL" if self.task_il_training else "Class-IL"
+        protocol_name = "Task-IL" if self.task_il_training else "Class-IL"
         print(
             f"\n[PCNMethod] Task {task_idx + 1} | {protocol} | "
             f"inference_steps={self.inference_steps} | "
