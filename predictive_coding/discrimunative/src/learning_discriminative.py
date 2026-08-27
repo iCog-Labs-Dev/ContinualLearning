@@ -5,13 +5,13 @@ from generative.src.utils import get_activation, LayerParams, init_layer_params
 from .energy_discriminative import compute_errors_discriminative
 
 
-def compute_weight_gradients_discriminative(params, states):
+def compute_weight_gradients_discriminative(params, states, active_classes=None):
     """
     Analytical discriminative-PC weight gradients.
 
     W_i (params[i]) only appears in predicting x_{i+1} from x_i.
     """
-    errors = compute_errors_discriminative(params, states)
+    errors = compute_errors_discriminative(params, states, active_classes=active_classes)
 
     batch_size = states[0].shape[0]
 

@@ -26,7 +26,7 @@ def predict_upper(params, states):
     return predictions
 
 
-def compute_errors_discriminative(params, states):
+def compute_errors_discriminative(params, states, active_classes=None):
     """
     e_{i+1} = x_{i+1} - x̂_{i+1}
 
@@ -38,19 +38,26 @@ def compute_errors_discriminative(params, states):
     for i in predictions:
         errors[i] = states[i] - predictions[i]
 
+    if active_classes is not None:
+        top_idx = len(params)
+        mask = jnp.zeros(errors[top_idx].shape[-1])
+        mask = mask.at[jnp.array(active_classes)].set(1.0)
+        errors[top_idx] = errors[top_idx] * mask
+
     return errors
 
 
-def compute_total_energy_discriminative(params, states):
+def compute_total_energy_discriminative(params, states, active_classes=None):
     """
     E = 1/2 Σ ||e_i||²
 
     Returns per-sample energy of shape (batch_size,).
     """
-    errors = compute_errors_discriminative(params, states)
+    errors = compute_errors_discriminative(params, states, active_classes)
 
     total_energy = 0.0
     for e in errors.values():
         total_energy += 0.5 * jnp.sum(jnp.square(e), axis=-1)
 
     return total_energy
+

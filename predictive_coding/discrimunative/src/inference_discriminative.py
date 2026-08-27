@@ -57,7 +57,7 @@ def init_states_discriminative(params, X, Y, mode="zero", clamped_indices=None):
     return states
 
 
-def compute_state_gradients_discriminative(params, states, clamped_indices=None):
+def compute_state_gradients_discriminative(params, states, clamped_indices=None, active_classes=None):
     """
     Analytical discriminative-PC state gradients.
 
@@ -70,7 +70,7 @@ def compute_state_gradients_discriminative(params, states, clamped_indices=None)
     if clamped_indices is None:
         clamped_indices = frozenset({0, num_states - 1})
 
-    errors = compute_errors_discriminative(params, states)
+    errors = compute_errors_discriminative(params, states, active_classes=active_classes)
     grads = {}
 
     for i in range(num_states):
@@ -99,10 +99,10 @@ def compute_state_gradients_discriminative(params, states, clamped_indices=None)
 
 @partial(
     jax.jit,
-    static_argnames=("num_steps", "eta_x", "mode", "clamped_indices")
+    static_argnames=("num_steps", "eta_x", "mode", "clamped_indices", "active_classes")
 )
 def settle_states_discriminative(
-    params, X, Y, num_steps=50, eta_x=0.1, mode="zero", clamped_indices=None
+    params, X, Y, num_steps=50, eta_x=0.1, mode="zero", clamped_indices=None, active_classes=None
 ):
     """
     Iterative discriminative-PC inference.
@@ -119,7 +119,7 @@ def settle_states_discriminative(
     def step_fn(step_idx, carry):
         states, energy_hist = carry
         grads = compute_state_gradients_discriminative(
-            params, states, clamped_indices=clamped_indices
+            params, states, clamped_indices=clamped_indices, active_classes=active_classes
         )
 
         new_states = dict(states)
@@ -127,9 +127,10 @@ def settle_states_discriminative(
             if i not in clamped_indices:
                 new_states[i] = states[i] - eta_x * grads[i]
 
-        energy = jnp.mean(compute_total_energy_discriminative(params, new_states))
+        energy = jnp.mean(compute_total_energy_discriminative(params, new_states, active_classes=active_classes))
         energy_hist = energy_hist.at[step_idx].set(energy)
         return new_states, energy_hist
 
     states, energy_hist = jax.lax.fori_loop(0, num_steps, step_fn, (states, energy_hist))
     return states, energy_hist
+

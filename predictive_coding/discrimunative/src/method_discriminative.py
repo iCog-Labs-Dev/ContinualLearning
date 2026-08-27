@@ -10,12 +10,12 @@ from core.data import Task
 
 from functools import partial
 
-@partial(jax.jit, static_argnames=("eta_x", "inference_steps"))
-def compute_energy_batch(params, X, Y, eta_x, inference_steps):
+@partial(jax.jit, static_argnames=("eta_x", "inference_steps", "active_classes"))
+def compute_energy_batch(params, X, Y, eta_x, inference_steps, active_classes=None):
     states, _ = settle_states_discriminative(
-        params, X, Y, num_steps=inference_steps, eta_x=eta_x, mode="bottom_up"
+        params, X, Y, num_steps=inference_steps, eta_x=eta_x, mode="bottom_up", active_classes=active_classes
     )
-    return jnp.mean(compute_total_energy_discriminative(params, states))
+    return jnp.mean(compute_total_energy_discriminative(params, states, active_classes=active_classes))
 
 
 class PCNMethodDiscriminative:
@@ -47,6 +47,8 @@ class PCNMethodDiscriminative:
             f"eta_x={self.eta_x} | eta_w={self.eta_w}"
         )
 
+        active_classes = tuple(task.classes) if self.task_il_training else None
+
         X_train = task.train_X * 2.0 - 1.0
         num_classes = self.layer_sizes[-1]
         Y_oh = jax.nn.one_hot(task.train_y, num_classes)
@@ -61,7 +63,7 @@ class PCNMethodDiscriminative:
             start = b * self.batch_size
             end = min(start + self.batch_size, n)
             energy_before += float(compute_energy_batch(
-                params, X_train[start:end], Y_oh[start:end], self.eta_x, self.inference_steps
+                params, X_train[start:end], Y_oh[start:end], self.eta_x, self.inference_steps, active_classes
             ))
         energy_before /= num_batches
         print(f"  Task {task_idx + 1} energy before training: {energy_before:.4f}")
@@ -89,6 +91,7 @@ class PCNMethodDiscriminative:
                     eta_w=self.eta_w,
                     inference_steps=self.inference_steps,
                     init_mode="bottom_up",
+                    active_classes=active_classes,
                 )
                 ep_energy += float(metrics["energy"])
 
@@ -105,7 +108,7 @@ class PCNMethodDiscriminative:
             start = b * self.batch_size
             end = min(start + self.batch_size, n)
             energy_after += float(compute_energy_batch(
-                params, X_train[start:end], Y_oh[start:end], self.eta_x, self.inference_steps
+                params, X_train[start:end], Y_oh[start:end], self.eta_x, self.inference_steps, active_classes
             ))
         energy_after /= num_batches
         print(f"  Task {task_idx + 1} energy after training:  {energy_after:.4f}")

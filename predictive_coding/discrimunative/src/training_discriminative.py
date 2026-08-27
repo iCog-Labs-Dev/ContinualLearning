@@ -7,7 +7,7 @@ from .learning_discriminative import compute_weight_gradients_discriminative
 from generative.src.learning import update_weights
 
 
-@partial(jax.jit, static_argnames=("eta_x", "eta_w", "inference_steps", "init_mode"))
+@partial(jax.jit, static_argnames=("eta_x", "eta_w", "inference_steps", "init_mode", "active_classes"))
 def train_step_discriminative(
     params,
     X,
@@ -16,6 +16,7 @@ def train_step_discriminative(
     eta_w=1e-3,
     inference_steps=50,
     init_mode="bottom_up",
+    active_classes=None,
 ):
     """
     One discriminative-PC training step.
@@ -38,11 +39,13 @@ def train_step_discriminative(
         eta_x=eta_x,
         mode=init_mode,
         clamped_indices=clamped_indices,
+        active_classes=active_classes,
     )
 
     grads = compute_weight_gradients_discriminative(
         params,
         states,
+        active_classes=active_classes,
     )
 
     new_params = update_weights(
