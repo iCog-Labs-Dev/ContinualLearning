@@ -5,13 +5,13 @@ from generative.src.utils import get_activation, LayerParams, init_layer_params
 from .energy_discriminative import compute_errors_discriminative
 
 
-def compute_weight_gradients_discriminative(params, states):
+def compute_weight_gradients_discriminative(params, states, active_classes=None):
     """
     Analytical discriminative-PC weight gradients.
 
     W_i (params[i]) only appears in predicting x_{i+1} from x_i.
     """
-    errors = compute_errors_discriminative(params, states)
+    errors = compute_errors_discriminative(params, states, active_classes=active_classes)
 
     batch_size = states[0].shape[0]
 
@@ -61,21 +61,20 @@ def init_pcn_params_discriminative(key, layer_sizes, activation="tanh", use_bias
     keys = jax.random.split(key, len(layer_sizes) - 1)
 
     params = []
+    num_layers = len(layer_sizes) - 1
 
-    for k, (lower_dim, upper_dim) in zip(
+    for i, (k, (lower_dim, upper_dim)) in enumerate(zip(
         keys,
         zip(layer_sizes[:-1], layer_sizes[1:])
-    ):
+    )):
+        layer_act = "linear" if i == num_layers - 1 else activation
         params.append(
             init_layer_params(
                 k,
                 fan_in=lower_dim,
                 fan_out=upper_dim,
-                activation=activation,
+                activation=layer_act,
                 use_bias=use_bias,
             )
         )
-
     return params
-
-

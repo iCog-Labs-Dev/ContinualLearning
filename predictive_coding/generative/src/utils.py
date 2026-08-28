@@ -98,21 +98,9 @@ def he_init(key, fan_in, fan_out):
 
 def init_layer_params(key, fan_in, fan_out, activation="tanh", use_bias=True):
     """
-    Initialize one generative layer.
 
-    Generative mapping:
-        x_{i+1} -> x_i
-
-    Weight shape:
-        (fan_out, fan_in)
-
-    Prediction:
-        x_hat_i = act(x_{i+1} @ W.T + b)
-
-    Parameters
-    ----------
     activation:
-        Name of activation function (``"tanh"``, ``"relu"``, ``"linear"``).
+
         He init is used automatically for ``"relu"``; Xavier for everything else.
     use_bias:
         If ``False``, bias is initialised to zeros and frozen during training.

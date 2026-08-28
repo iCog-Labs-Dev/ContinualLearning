@@ -10,3 +10,4 @@ __pycache__/
 results/
 result_predicitive_coding_log/
 *.log
+combined.py
