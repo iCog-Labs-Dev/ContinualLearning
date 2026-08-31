@@ -8,3 +8,6 @@ __pycache__/
 .ipynb_checkpoints/
 
 results/
+result_predicitive_coding_log/
+*.log
+combined.py

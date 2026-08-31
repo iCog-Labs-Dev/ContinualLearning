@@ -6,7 +6,10 @@ from core.metrics import bce_nll, class_il_predict, nll, task_il_predict
 class Evaluator:
 
     def evaluate(self, model, params, task, allowed_classes=None):
-        logits = model.forward(params, task.test_X)
+        try:
+            logits = model.forward(params, task.test_X, active_classes=allowed_classes)
+        except TypeError:
+            logits = model.forward(params, task.test_X)
 
         if allowed_classes is not None:
             predictions = task_il_predict(logits, allowed_classes)
