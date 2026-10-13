@@ -9,6 +9,7 @@ __pycache__/
 predictive_coding
 *.log
 result_predicitive_coding_log
-test*/
+tests
+
 results/
 structured_lateral.patch

@@ -34,12 +34,23 @@ class CausalCodingModel:
         lateral_rank=16,
         lateral_init_scale=1e-3,
         alpha_init=1e-4,
+        lateral_mode="lowrank",
+        struct_group_size=16,
+        struct_alpha_e=0.13,
+        struct_inhib_total=0.25,
+        struct_rho=0.2,
     ):
         self.layer_sizes = list(layer_sizes)
         self.num_layers = len(layer_sizes)
         self.lateral_rank = lateral_rank
         self.lateral_init_scale = lateral_init_scale
         self.alpha_init = alpha_init
+        # Structured lateral (paper's V). Single source of truth for rho / K.
+        self.lateral_mode = lateral_mode
+        self.struct_group_size = struct_group_size
+        self.struct_alpha_e = struct_alpha_e
+        self.struct_inhib_total = struct_inhib_total
+        self.struct_rho = struct_rho
 
     def init_params(self, key):
         key_w, key_lU = jax.random.split(key, 2)
@@ -94,7 +105,7 @@ class CausalCodingModel:
         vertical_layer_scales = [jnp.asarray(0.0) for _ in weights]
         vertical_adam_step = jnp.zeros((), dtype=jnp.float32)
 
-        return {
+        params = {
             "weights": weights,
             "log_precisions": log_precisions,
             "precision_var_ema": precision_var_ema,
@@ -111,6 +122,21 @@ class CausalCodingModel:
             "vertical_match_loss": jnp.asarray(0.0),
             "vertical_sparse_loss": jnp.asarray(0.0),
         }
+        if self.lateral_mode in ("structured", "both"):
+            from causal_coding.src.lateral_ops import init_structured
+
+            s, b, p_ema, q_ema = init_structured(
+                hidden_dims, self.struct_group_size,
+                self.struct_alpha_e, self.struct_inhib_total, self.struct_rho,
+            )
+            params.update({
+                "struct_s": s,
+                "struct_b": b,
+                "struct_p_ema": p_ema,
+                "struct_q_ema": q_ema,
+                "struct_guard_frac": [jnp.zeros(()) for _ in hidden_dims],
+            })
+        return params
 
     def forward(self, params, X):
         h = X.T
