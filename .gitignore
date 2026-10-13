@@ -6,5 +6,9 @@ __pycache__/
 .venv/
 *.egg-info/
 .ipynb_checkpoints/
-
+predictive_coding
+*.log
+result_predicitive_coding_log
+test*/
 results/
+structured_lateral.patch
