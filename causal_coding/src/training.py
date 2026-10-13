@@ -228,9 +228,9 @@ def train_step(
             gated_hebbian = gated_hebbian * scale
         delta_w = jnp.mean(gated_hebbian, axis=0)
         gated_delta_w = vertical_eff_gates[l] * delta_w
-        new_weights.append(
-            weights[l] + lr_w * gated_delta_w - lambda_s * jnp.sign(weights[l])
-        )
+        gated_delta_w = jnp.where(jnp.isfinite(gated_delta_w), gated_delta_w, 0.0)
+        new_w = weights[l] + lr_w * gated_delta_w - lambda_s * jnp.sign(weights[l])
+        new_weights.append(jnp.where(jnp.isfinite(new_w), new_w, weights[l]))
 
     # Update hidden-layer residual precision from early-inference residual
     # variance. Structured relative-D diagonal precision; output precision stays

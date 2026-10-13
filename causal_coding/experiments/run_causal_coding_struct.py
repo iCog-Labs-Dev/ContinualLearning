@@ -51,6 +51,8 @@ ap.add_argument("--schur-include", action="store_true",
 ap.add_argument("--freeze-after-task1", action="store_true",
                 help="stop learning s, b after the first task")
 ap.add_argument("--epochs", type=int, default=60)
+ap.add_argument("--lr-w", type=float, default=0.02, help="Hebbian weight learning rate")
+ap.add_argument("--lambda-s", type=float, default=1e-5, help="weight decay / regularization coefficient")
 args = ap.parse_args()
 
 lateral_mode, struct_learning = ARMS[args.arm]
@@ -81,12 +83,12 @@ params = model.init_params(key)
 
 method = CausalCodingMethod(
     lr_z=0.05,
-    lr_w=0.05,
+    lr_w=args.lr_w,
     num_inference_steps=30,
     gate_p=2.0,
     gate_kappa=1e-3,
     ridge=1e-4,
-    lambda_s=0.0,
+    lambda_s=args.lambda_s,
     batch_size=128,
     epochs=args.epochs,
     beta_pi=0.99,
