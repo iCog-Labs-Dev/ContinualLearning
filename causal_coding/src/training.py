@@ -228,6 +228,10 @@ def train_step(
             gated_hebbian = gated_hebbian * scale
         delta_w = jnp.mean(gated_hebbian, axis=0)
         gated_delta_w = vertical_eff_gates[l] * delta_w
+        dw_norm = jnp.linalg.norm(gated_delta_w)
+        gated_delta_w = jnp.where(
+            dw_norm > 1.0, gated_delta_w * (1.0 / (dw_norm + 1e-12)), gated_delta_w
+        )
         gated_delta_w = jnp.where(jnp.isfinite(gated_delta_w), gated_delta_w, 0.0)
         new_w = weights[l] + lr_w * gated_delta_w - lambda_s * jnp.sign(weights[l])
         new_weights.append(jnp.where(jnp.isfinite(new_w), new_w, weights[l]))
@@ -240,13 +244,15 @@ def train_step(
     log_pi0 = jnp.log(pi0)
     for l in range(num_hidden):
         mean_batch_eps_sq = jnp.mean(early_eps_sq_sum[l] / k_probe, axis=1)
-        new_v = beta_pi * precision_var_ema[l] + (1.0 - beta_pi) * mean_batch_eps_sq
+        cand_v = beta_pi * precision_var_ema[l] + (1.0 - beta_pi) * mean_batch_eps_sq
+        new_v = jnp.where(jnp.isfinite(cand_v), cand_v, precision_var_ema[l])
         v_bar = jnp.mean(new_v)
         delta_l = rho_v * v_bar + delta_abs
         d_tilde = (v_bar + delta_l) / (new_v + delta_l)
         d_clip = jnp.clip(d_tilde, d_min, d_max)
         d_l = d_clip / jnp.mean(d_clip)
-        new_log_pi = log_pi0 + jnp.log(d_l)
+        cand_log_pi = log_pi0 + jnp.log(d_l)
+        new_log_pi = jnp.where(jnp.isfinite(cand_log_pi), cand_log_pi, log_precisions[l])
         new_precision_var_ema.append(new_v)
         new_log_precisions.append(new_log_pi)
     new_log_precisions.append(log_precisions[-1])

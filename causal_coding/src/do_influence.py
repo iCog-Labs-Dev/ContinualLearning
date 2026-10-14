@@ -56,13 +56,16 @@ def compute_output_fisher(weights, xs_eq, task_il_training=False, active_mask=No
       Schur solve's ridge term is the only stabilizer on inactive rows.
     """
     logits = weights[-1] @ relu(xs_eq[-2])
+    logits = jnp.clip(logits, -50.0, 50.0)
     if task_il_training:
         probs = jax.nn.sigmoid(logits)
         diag = active_mask * jnp.mean(probs * (1.0 - probs), axis=1)
-        return jnp.diag(diag)
+        F = jnp.diag(diag)
+        return jnp.where(jnp.isfinite(F), F, 0.0)
     probs = jax.nn.softmax(logits, axis=0)
     B = probs.shape[1]
-    return jnp.diag(jnp.mean(probs, axis=1)) - (probs @ probs.T) / B
+    F = jnp.diag(jnp.mean(probs, axis=1)) - (probs @ probs.T) / B
+    return jnp.where(jnp.isfinite(F), F, 0.0)
 
 
 def compute_local_maps(
