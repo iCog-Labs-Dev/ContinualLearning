@@ -53,6 +53,12 @@ ap.add_argument("--freeze-after-task1", action="store_true",
 ap.add_argument("--epochs", type=int, default=60)
 ap.add_argument("--lr-w", type=float, default=0.02, help="Hebbian weight learning rate")
 ap.add_argument("--lambda-s", type=float, default=1e-5, help="weight decay / regularization coefficient")
+ap.add_argument("--gate-norm", choices=["sum", "match"], default="sum",
+                help="causal gate normalization: 'sum' (default) or 'match' (preserves update norm)")
+ap.add_argument("--no-vertical", action="store_true",
+                help="disable vertical pruning")
+ap.add_argument("--task-1-only", action="store_true",
+                help="run only the first task for fast diagnostic sweeps")
 args = ap.parse_args()
 
 lateral_mode, struct_learning = ARMS[args.arm]
@@ -61,10 +67,18 @@ run_name = "causal_coding" if args.arm == "L1" and not args.schur_include else (
     + ("_schur" if args.schur_include else "")
     + ("_freeze" if args.freeze_after_task1 else "")
 )
+if args.no_vertical:
+    run_name += "_noVert"
+if args.gate_norm != "sum":
+    run_name += f"_{args.gate_norm}"
+if args.lambda_s == 0.0:
+    run_name += "_noDecay"
 
 X, y, test_X, test_y = load_mnist()
 class_pairs = [[0, 1], [2, 3], [4, 5], [6, 7], [8, 9]]
 tasks = split_into_tasks(X, y, test_X, test_y, class_pairs)
+if args.task_1_only:
+    tasks = tasks[:1]
 
 model = CausalCodingModel(
     [784, 512, 512, 10],
@@ -118,7 +132,8 @@ method = CausalCodingMethod(
     d_max=1.5,
 
     # Soft hidden-only vertical pruning gates.
-    vertical_pruning_enabled=True,
+    vertical_pruning_enabled=not args.no_vertical,
+    gate_norm=args.gate_norm,
     vertical_layer_scales=(1.0, 1.0, 0.0),
     vertical_alpha_g=8.0,
     lambda_vert_match=1e-3,

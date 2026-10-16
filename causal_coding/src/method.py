@@ -1,3 +1,4 @@
+import jax
 import jax.numpy as jnp
 
 from core.data import Task
@@ -370,6 +371,33 @@ class CausalCodingMethod:
                 f"[ramp={lateral_force_scale:.2f}, "
                 f"lr_scale={lateral_lr_scale:.1f}, "
                 f"vert={vertical_lr_scale:.2f}]"
+            )
+
+            # Diagnostic feedforward metrics and weight statistics
+            n_eval = min(2000, int(task.train_X.shape[0]))
+            eval_X = task.train_X[:n_eval]
+            eval_y = task.train_y[:n_eval]
+            logits = model.forward(params, eval_X)
+            lp = jax.nn.log_softmax(logits, axis=1)
+            ff_nll = float(-jnp.mean(lp[jnp.arange(n_eval), eval_y]))
+            ff_acc = float(jnp.mean(jnp.argmax(logits, axis=1) == eval_y))
+
+            active = jnp.array(task.classes)
+            task_logits = logits[:, active]
+            lp_task = jax.nn.log_softmax(task_logits, axis=-1)
+            y_local = jnp.argmax((eval_y[:, None] == active[None, :]).astype(jnp.int32), axis=1)
+            task_nll = float(-jnp.mean(lp_task[jnp.arange(n_eval), y_local]))
+            task_acc = float(jnp.mean(jnp.argmax(task_logits, axis=1) == y_local))
+
+            wf = [float(jnp.linalg.norm(w)) for w in params["weights"]]
+            dead = [float(jnp.mean(jnp.abs(w) < 1e-4)) for w in params["weights"]]
+            wf_str = "[" + ", ".join(f"{x:.2f}" for x in wf) + "]"
+            dead_str = "[" + ", ".join(f"{x:.3f}" for x in dead) + "]"
+
+            print(
+                f"   ff_nll={ff_nll:.4f} ff_acc={ff_acc*100:.2f}% "
+                f"(task_nll={task_nll:.4f} task_acc={task_acc*100:.2f}%) "
+                f"W_fro={wf_str} dead={dead_str}"
             )
 
             if diagnostics_hook is not None:
