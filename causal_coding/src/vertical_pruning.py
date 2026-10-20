@@ -117,8 +117,7 @@ def adam_update_vertical(
     """Adam update for gate logits with warmup and per-layer participation."""
     g_norm = _global_grad_norm(grads)
     clip_scale = jnp.minimum(1.0, clip_norm / (g_norm + 1e-12))
-    is_active = (lr_scale > 0.0).astype(jnp.float32)
-    new_step = step_counter + is_active
+    new_step = step_counter + lr_scale
 
     new_logits = []
     new_states = []
@@ -133,15 +132,10 @@ def adam_update_vertical(
         v_hat = v_cand / bc2
         h_step = lr_vert * m_hat / (jnp.sqrt(v_hat) + eps)
 
-        layer_active = jnp.where(jnp.asarray(layer_scale) > 0.0, 1.0, 0.0)
-        eff_scale = lr_scale * layer_active
-        h_cand = h - eff_scale * h_step
-        # Clip logits to [-8.0, 8.0] so gates remain smooth and well-behaved
-        h_new = jnp.clip(h_cand, -8.0, 8.0)
-        h_new = jnp.where(jnp.isfinite(h_new), h_new, h)
-
-        m_new = jnp.where(eff_scale > 0.0, m_cand, st["m"])
-        v_new = jnp.where(eff_scale > 0.0, v_cand, st["v"])
+        layer_lr_scale = lr_scale * jnp.where(jnp.asarray(layer_scale) > 0.0, 1.0, 0.0)
+        h_new = h - layer_lr_scale * h_step
+        m_new = layer_lr_scale * m_cand + (1.0 - layer_lr_scale) * st["m"]
+        v_new = layer_lr_scale * v_cand + (1.0 - layer_lr_scale) * st["v"]
 
         new_logits.append(h_new)
         new_states.append({"m": m_new, "v": v_new})

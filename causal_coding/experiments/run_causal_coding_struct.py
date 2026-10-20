@@ -29,10 +29,14 @@ from src.model import CausalCodingModel
 from src.method import CausalCodingMethod
 
 ARMS = {
+    "L0": ("off", "fixed"),
     "L1": ("lowrank", "fixed"),
     "S0": ("structured", "fixed"),
     "S1": ("structured", "scalar"),
     "S2": ("structured", "perunit"),
+    "B0": ("both", "fixed"),
+    "B1": ("both", "scalar"),
+    "B2": ("both", "perunit"),
 }
 
 ap = argparse.ArgumentParser()
@@ -51,8 +55,8 @@ ap.add_argument("--schur-include", action="store_true",
 ap.add_argument("--freeze-after-task1", action="store_true",
                 help="stop learning s, b after the first task")
 ap.add_argument("--epochs", type=int, default=60)
-ap.add_argument("--lr-w", type=float, default=0.02, help="Hebbian weight learning rate")
-ap.add_argument("--lambda-s", type=float, default=1e-5, help="weight decay / regularization coefficient")
+ap.add_argument("--lr-w", type=float, default=0.05, help="Hebbian weight learning rate")
+ap.add_argument("--lambda-s", type=float, default=0.0, help="weight decay / regularization coefficient")
 ap.add_argument("--gate-norm", choices=["sum", "match"], default="sum",
                 help="causal gate normalization: 'sum' (default) or 'match' (preserves update norm)")
 ap.add_argument("--no-vertical", action="store_true",

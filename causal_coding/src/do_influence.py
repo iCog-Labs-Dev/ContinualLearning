@@ -56,16 +56,13 @@ def compute_output_fisher(weights, xs_eq, task_il_training=False, active_mask=No
       Schur solve's ridge term is the only stabilizer on inactive rows.
     """
     logits = weights[-1] @ relu(xs_eq[-2])
-    logits = jnp.clip(logits, -50.0, 50.0)
     if task_il_training:
         probs = jax.nn.sigmoid(logits)
         diag = active_mask * jnp.mean(probs * (1.0 - probs), axis=1)
-        F = jnp.diag(diag)
-        return jnp.where(jnp.isfinite(F), F, 0.0)
+        return jnp.diag(diag)
     probs = jax.nn.softmax(logits, axis=0)
     B = probs.shape[1]
-    F = jnp.diag(jnp.mean(probs, axis=1)) - (probs @ probs.T) / B
-    return jnp.where(jnp.isfinite(F), F, 0.0)
+    return jnp.diag(jnp.mean(probs, axis=1)) - (probs @ probs.T) / B
 
 
 def compute_local_maps(
@@ -165,18 +162,14 @@ def compute_local_maps(
             # right-hand sides).
             J_per = jacobians_per_sample[l]                       # (B, d_out, d_in)
             PJ_per = jax.vmap(lambda J: apply_above_curvature(l, J))(J_per)
-            A_sol = jnp.linalg.solve(G_bar_next_reg, PJ_per)      # (B, d_out, d_in)
-            A_tildes[l] = jnp.where(jnp.isfinite(A_sol), A_sol, 0.0)
+            A_tildes[l] = jnp.linalg.solve(G_bar_next_reg, PJ_per)  # (B, d_out, d_in)
         else:
-            A_sol = jnp.linalg.solve(G_bar_next_reg, PJ_batch)    # (d_out, d_in)
-            A_tildes[l] = jnp.where(jnp.isfinite(A_sol), A_sol, 0.0)
+            A_tildes[l] = jnp.linalg.solve(G_bar_next_reg, PJ_batch)  # (d_out, d_in)
 
         if l > 0:
             # Schur update: uses the batch-averaged PJ (Fisher metric semantics).
             schur = PJ_batch.T @ jnp.linalg.solve(G_bar_next_reg, PJ_batch)
-            G_raw = build_H(l) - schur
-            G_raw = 0.5 * (G_raw + G_raw.T)
-            G_bar_next = jnp.where(jnp.isfinite(G_raw), G_raw, jnp.diag(precisions[l - 1]))
+            G_bar_next = build_H(l) - schur
 
     return A_tildes
 
@@ -200,14 +193,11 @@ def compute_causal_gates(A_tildes, p=2.0, kappa=1e-3):
     """
     gates = []
     for A_k in A_tildes:
-        A_clean = jnp.where(jnp.isfinite(A_k), A_k, 0.0)
-        A_clipped = jnp.clip(A_clean, -1e4, 1e4)
-        abs_A_p = jnp.abs(A_clipped) ** p
+        abs_A_p = jnp.abs(A_k) ** p
         if abs_A_p.ndim == 3:
             abs_A_p = jnp.mean(abs_A_p, axis=0)  # average |Ã|^p across batch
         denom = jnp.sum(abs_A_p, axis=1, keepdims=True) + kappa
-        g = abs_A_p / denom
-        gates.append(jnp.where(jnp.isfinite(g), g, 0.0))
+        gates.append(abs_A_p / denom)
     return gates
 
 
@@ -239,15 +229,12 @@ def compute_causal_gates_per_sample(A_tildes_per_sample, p=2.0, kappa=1e-3):
     same input for a 2D summary of the gate structure.
     """
     gates = []
-    for A_k in A_tildes_per_sample:
+    for l, A_k in enumerate(A_tildes_per_sample):
         assert A_k.ndim == 3, (
             f"compute_causal_gates_per_sample expects (B, d_out, d_in) per "
             f"layer; got shape {A_k.shape}"
         )
-        A_clean = jnp.where(jnp.isfinite(A_k), A_k, 0.0)
-        A_clipped = jnp.clip(A_clean, -1e4, 1e4)
-        abs_A_p = jnp.abs(A_clipped) ** p                          # (B, d_out, d_in)
+        abs_A_p = jnp.abs(A_k) ** p                                # (B, d_out, d_in)
         denom = jnp.sum(abs_A_p, axis=2, keepdims=True) + kappa    # (B, d_out, 1)
-        g = abs_A_p / denom                                        # (B, d_out, d_in)
-        gates.append(jnp.where(jnp.isfinite(g), g, 0.0))
+        gates.append(abs_A_p / denom)                              # (B, d_out, d_in)
     return gates

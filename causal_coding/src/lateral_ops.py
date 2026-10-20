@@ -26,7 +26,7 @@ import jax.numpy as jnp
 
 from causal_coding.src.activations import relu
 
-VALID_MODES = ("lowrank", "structured", "both")
+VALID_MODES = ("off", "lowrank", "structured", "both")
 VALID_LEARNING = ("fixed", "scalar", "perunit")
 
 
@@ -69,6 +69,10 @@ def build_lateral_ops(params, mode, force_scale):
     if mode not in VALID_MODES:
         raise ValueError(f"lateral_mode must be one of {VALID_MODES}, got {mode!r}")
 
+    if mode == "off":
+        num_hidden = len(params["weights"]) - 1
+        return [None for _ in range(num_hidden)]
+
     if mode == "lowrank":
         raw_alphas = [jax.nn.softplus(rho) for rho in params["lateral_log_alpha"]]
         eff_alphas = [force_scale * a for a in raw_alphas]
@@ -98,6 +102,8 @@ def apply_lateral(op, z):
     With V = B - diag(s) the force is V.relu(z); subtracting it gives
     +s_i relu(z_i) (self-excitation) and -sum_j B_ij relu(z_j) (inhibition).
     """
+    if op is None:
+        return jnp.zeros_like(z)
     # NamedTuples are tuples, so check them before the plain 2-tuple case.
     if isinstance(op, StructLateral):
         G, K, _ = op.b.shape
@@ -116,6 +122,8 @@ def dense_lateral(op, mask=None, include_structured=False):
     include_structured is STATIC. With mask (batch-mean relu' of the layer)
     the structured part is symmetrised as D^{1/2} V D^{1/2}.
     """
+    if op is None:
+        return None
     if isinstance(op, StructLateral):
         return _dense_struct(op, mask) if include_structured else None
     if isinstance(op, BothLateral):
