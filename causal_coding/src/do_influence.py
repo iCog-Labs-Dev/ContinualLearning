@@ -103,6 +103,8 @@ def compute_local_maps(
         f"edge excluded)."
     )
     for i, pair in enumerate(lateral_pairs):
+        if pair is None:
+            continue
         if not isinstance(pair, (StructLateral, BothLateral)):
             _alpha, U = pair
             assert U.ndim == 2, f"lateral_pairs[{i}] U must be 2D, got shape {U.shape}"
