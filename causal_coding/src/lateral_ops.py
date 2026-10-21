@@ -109,9 +109,9 @@ def apply_lateral(op, z):
         G, K, _ = op.b.shape
         phi = relu(z)
         Bphi = jnp.einsum("gij,gjb->gib", op.b, phi.reshape(G, K, -1)).reshape(z.shape)
-        # Saturating self-excitation prevents exponential weight runaway when a unit wins its block:
+        # Bound self-excitation by incoming competition so silent neighbors cannot pump phantom positive residual:
         phi_sat = phi / (1.0 + phi)
-        return Bphi - op.s[:, None] * phi_sat
+        return jnp.maximum(0.0, Bphi - op.s[:, None] * phi_sat)
     if isinstance(op, BothLateral):
         return apply_lateral(op.lowrank, z) + apply_lateral(op.structured, z)
     alpha, U = op
