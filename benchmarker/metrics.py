@@ -7,6 +7,8 @@ def average_accuracy(matrix):
 
 def backward_transfer(matrix):
     T = len(matrix)
+    if T <= 1:
+        return 0.0
 
     bwt_sum = 0
     for i in range(T - 1):
@@ -22,6 +24,8 @@ def backward_transfer(matrix):
 
 def forward_transfer(matrix, baselines):
     T = len(matrix)
+    if T <= 1:
+        return 0.0
     fwt_sum = 0
 
     for i in range(1, T):
@@ -35,6 +39,8 @@ def forward_transfer(matrix, baselines):
 
 def forgetting(matrix):
     T = len(matrix)
+    if T <= 1:
+        return 0.0
     frt_sum = 0
 
     for i in range(T - 1):
@@ -64,6 +70,8 @@ def backward_transfer_nll(matrix):
     analogue of the accuracy BWT (final − diagonal).
     """
     T = len(matrix)
+    if T <= 1:
+        return 0.0
     total = 0
     for i in range(T - 1):
         diagonal_value = matrix[i][i]
@@ -80,6 +88,8 @@ def forgetting_nll(matrix):
     BEST/MINIMUM NLL as the reference, never a "peak".
     """
     T = len(matrix)
+    if T <= 1:
+        return 0.0
     total = 0
     for i in range(T - 1):
         column_i = jnp.array([matrix[t][i] for t in range(i, T)])
@@ -108,6 +118,8 @@ def forward_transfer_nll(matrix, baselines):
     task i.
     """
     T = len(matrix)
+    if T <= 1:
+        return 0.0
     total = 0
     for i in range(1, T):
         before_training = matrix[i - 1][i]
