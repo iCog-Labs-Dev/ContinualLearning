@@ -229,13 +229,18 @@ def train_step(
         delta_w = jnp.mean(gated_hebbian, axis=0)
         gated_delta_w = vertical_eff_gates[l] * delta_w
 
-        # Stability weight norm cap
         cand_w = weights[l] + lr_w * gated_delta_w - lambda_s * jnp.sign(weights[l])
-        init_norm = jnp.sqrt(2.0 * cand_w.shape[1]) if l == 0 else jnp.linalg.norm(weights[l])
-        w_norm = jnp.linalg.norm(cand_w)
-        new_w = jnp.where(w_norm > init_norm * 1.5, cand_w * (init_norm * 1.5 / (w_norm + 1e-12)), cand_w)
-
-        new_w = jnp.where(jnp.isfinite(new_w), new_w, weights[l])
+        if l < num_layers - 2:
+            # Per-neuron (row-wise) L2 norm cap: initial He row norm is sqrt(2.0) ≈ 1.414.
+            # Capping per-row ensures active neurons on Task 2-5 never shrink Task 1 neurons!
+            row_norms = jnp.linalg.norm(cand_w, axis=1, keepdims=True)
+            max_row_norm = jnp.sqrt(2.0) * 1.05
+            cand_w = jnp.where(
+                row_norms > max_row_norm,
+                cand_w * (max_row_norm / (row_norms + 1e-12)),
+                cand_w,
+            )
+        new_w = jnp.where(jnp.isfinite(cand_w), cand_w, weights[l])
         new_weights.append(new_w)
 
     # Update hidden-layer residual precision from early-inference residual
@@ -367,15 +372,17 @@ def train_step(
         # Active-slice BCE: sum over active classes, then average over samples.
         p = jax.nn.sigmoid(prediction)
         bce = -(
-            y_batch.T * jnp.log(p + 1e-8)
-            + (1.0 - y_batch.T) * jnp.log(1.0 - p + 1e-8)
+            y_batch.T * jnp.log(jnp.clip(p, 1e-7, 1.0 - 1e-7))
+            + (1.0 - y_batch.T) * jnp.log(jnp.clip(1.0 - p, 1e-7, 1.0 - 1e-7))
         )
         bce = active_mask[:, None] * bce
         loss = jnp.mean(jnp.sum(bce, axis=0))
+        loss = jnp.where(jnp.isfinite(loss), loss, 0.0)
     else:
         probs = jax.nn.softmax(prediction, axis=0)
-        log_probs = jnp.log(probs + 1e-8)
+        log_probs = jnp.log(jnp.clip(probs, 1e-7, 1.0))
         ce = -jnp.sum(y_batch.T * log_probs, axis=0)
         loss = jnp.mean(ce)
+        loss = jnp.where(jnp.isfinite(loss), loss, 0.0)
 
     return new_params, loss

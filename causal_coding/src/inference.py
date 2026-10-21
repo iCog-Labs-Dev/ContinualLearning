@@ -67,7 +67,9 @@ def _infer_step(
         top_down = weights[l].T @ weighted_above * relu_derivative(xs[l])
         # Low-rank lateral: α · U (Uᵀ z), O(d·r·B) vs O(d²·B).
         lateral = apply_lateral(lateral_pairs[l - 1], xs[l])
-        new_xs.append(xs[l] + lr_z * (top_down - weighted_self - lateral))
+        z_next = xs[l] + lr_z * (top_down - weighted_self - lateral)
+        z_next = jnp.clip(z_next, -30.0, 30.0)
+        new_xs.append(jnp.where(jnp.isfinite(z_next), z_next, xs[l]))
 
     new_xs.append(xs[-1])
     return new_xs
