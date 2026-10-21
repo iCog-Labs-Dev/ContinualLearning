@@ -109,7 +109,9 @@ def apply_lateral(op, z):
         G, K, _ = op.b.shape
         phi = relu(z)
         Bphi = jnp.einsum("gij,gjb->gib", op.b, phi.reshape(G, K, -1)).reshape(z.shape)
-        return Bphi - op.s[:, None] * phi
+        # Saturating self-excitation prevents exponential weight runaway when a unit wins its block:
+        phi_sat = phi / (1.0 + phi)
+        return Bphi - op.s[:, None] * phi_sat
     if isinstance(op, BothLateral):
         return apply_lateral(op.lowrank, z) + apply_lateral(op.structured, z)
     alpha, U = op
@@ -143,11 +145,13 @@ def _dense_struct(op, mask):
     d = G * K
     eye_G = jnp.eye(G, dtype=op.b.dtype)
     B_dense = jnp.einsum("gij,gh->gihj", op.b, eye_G).reshape(d, d)
-    V = B_dense - jnp.diag(op.s)
+    # PSD Laplacian curvature for Schur stability: diag(s + row_sum(B)) - B_dense >= 0
+    row_sum_B = jnp.sum(op.b, axis=-1).reshape(-1)
+    V_psd = jnp.diag(op.s + row_sum_B) - B_dense
     if mask is not None:
         sq = jnp.sqrt(jnp.maximum(mask, 0.0))
-        V = sq[:, None] * V * sq[None, :]
-    return V
+        V_psd = sq[:, None] * V_psd * sq[None, :]
+    return V_psd
 
 
 def guard(s, b, pi, c=0.5):
