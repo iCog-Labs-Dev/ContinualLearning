@@ -108,10 +108,15 @@ def apply_lateral(op, z):
     if isinstance(op, StructLateral):
         G, K, _ = op.b.shape
         phi = relu(z)
+        # Chain-rule factor relu'(z) = 1[z > 0]: silent neurons (z <= 0)
+        # receive ZERO lateral force so inactive old-task neurons keep eps = 0!
+        active = (z > 0.0).astype(z.dtype)
         Bphi = jnp.einsum("gij,gjb->gib", op.b, phi.reshape(G, K, -1)).reshape(z.shape)
-        # Bound self-excitation by incoming competition so silent neighbors cannot pump phantom positive residual:
         phi_sat = phi / (1.0 + phi)
-        return jnp.maximum(0.0, Bphi - op.s[:, None] * phi_sat)
+        raw_force = jnp.maximum(0.0, Bphi - op.s[:, None] * phi_sat)
+        # Scale by 0.02 and bound by phi so lateral competition refines active
+        # representations without overpowering top_down or drifting W_fro:
+        return 0.02 * active * jnp.minimum(phi, raw_force)
     if isinstance(op, BothLateral):
         return apply_lateral(op.lowrank, z) + apply_lateral(op.structured, z)
     alpha, U = op
@@ -147,7 +152,7 @@ def _dense_struct(op, mask):
     B_dense = jnp.einsum("gij,gh->gihj", op.b, eye_G).reshape(d, d)
     # PSD Laplacian curvature for Schur stability: diag(s + row_sum(B)) - B_dense >= 0
     row_sum_B = jnp.sum(op.b, axis=-1).reshape(-1)
-    V_psd = jnp.diag(op.s + row_sum_B) - B_dense
+    V_psd = 0.02 * (jnp.diag(op.s + row_sum_B) - B_dense)
     if mask is not None:
         sq = jnp.sqrt(jnp.maximum(mask, 0.0))
         V_psd = sq[:, None] * V_psd * sq[None, :]
@@ -201,7 +206,9 @@ def struct_update(
         return s_new, b_new, p_ema_new, q_ema_new, frac
 
     delta_s = lr_s * (rho - p_ema_new)
-    delta_b = lr_b * (q_ema_new - rho ** 2) * off_mask
+    p_g = p_ema_new.reshape(G, K)
+    p_outer = p_g[:, :, None] * p_g[:, None, :]
+    delta_b = lr_b * (q_ema_new - p_outer) * off_mask
 
     if struct_learning == "scalar":
         delta_s = jnp.full_like(s, jnp.mean(delta_s))
@@ -215,8 +222,8 @@ def struct_update(
     delta_s = lr_scale * delta_s
     delta_b = lr_scale * delta_b
 
-    s_cand = jnp.maximum(0.0, s + delta_s)
-    b_cand = jnp.maximum(0.0, b + delta_b) * off_mask
+    s_cand = jnp.clip(s + delta_s, 0.0, 0.30)
+    b_cand = jnp.clip(b + delta_b, 0.0, 0.05) * off_mask
     b_cand = 0.5 * (b_cand + b_cand.transpose(0, 2, 1))
 
     s_new, b_new, frac = guard(s_cand, b_cand, pi_for_guard, guard_c)

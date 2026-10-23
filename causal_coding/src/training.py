@@ -230,16 +230,6 @@ def train_step(
         gated_delta_w = vertical_eff_gates[l] * delta_w
 
         cand_w = weights[l] + lr_w * gated_delta_w - lambda_s * jnp.sign(weights[l])
-        if l < num_layers - 2:
-            # Per-neuron (row-wise) L2 norm cap: initial He row norm is sqrt(2.0) ≈ 1.414.
-            # Capping per-row ensures active neurons on Task 2-5 never shrink Task 1 neurons!
-            row_norms = jnp.linalg.norm(cand_w, axis=1, keepdims=True)
-            max_row_norm = jnp.sqrt(2.0) * 1.05
-            cand_w = jnp.where(
-                row_norms > max_row_norm,
-                cand_w * (max_row_norm / (row_norms + 1e-12)),
-                cand_w,
-            )
         new_w = jnp.where(jnp.isfinite(cand_w), cand_w, weights[l])
         new_weights.append(new_w)
 
