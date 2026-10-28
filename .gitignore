@@ -14,3 +14,5 @@ tests
 results/
 structured_lateral.patch
 causal_coding/*.txt
+causal_coding/result
+report.latex

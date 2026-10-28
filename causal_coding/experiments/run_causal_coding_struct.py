@@ -61,6 +61,8 @@ ap.add_argument("--gate-norm", choices=["sum", "match"], default="sum",
                 help="causal gate normalization: 'sum' (default) or 'match' (preserves update norm)")
 ap.add_argument("--no-vertical", action="store_true",
                 help="disable vertical pruning")
+ap.add_argument("--seed", type=int, default=0,
+                help="random seed for initialization and training")
 ap.add_argument("--task-1-only", action="store_true",
                 help="run only the first task for fast diagnostic sweeps")
 args = ap.parse_args()
@@ -71,6 +73,8 @@ run_name = "causal_coding" if args.arm == "L1" and not args.schur_include else (
     + ("_schur" if args.schur_include else "")
     + ("_freeze" if args.freeze_after_task1 else "")
 )
+if args.seed != 0:
+    run_name += f"_seed{args.seed}"
 if args.no_vertical:
     run_name += "_noVert"
 if args.gate_norm != "sum":
@@ -96,7 +100,7 @@ model = CausalCodingModel(
     struct_inhib_total=args.inhib_total,
     struct_rho=args.rho,
 )
-key = jax.random.PRNGKey(0)
+key = jax.random.PRNGKey(args.seed)
 params = model.init_params(key)
 
 method = CausalCodingMethod(
@@ -169,6 +173,7 @@ method = CausalCodingMethod(
 config = dict(vars(method))
 config.update(
     arm=args.arm,
+    seed=args.seed,
     struct_rho=args.rho,
     struct_group_size=args.group_size,
     struct_alpha_e=args.alpha_e,
