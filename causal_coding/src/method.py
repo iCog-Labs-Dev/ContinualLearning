@@ -1,7 +1,9 @@
+import jax
 import jax.numpy as jnp
 
 from core.data import Task
 from causal_coding.src.lateral import ramp_schedule
+from causal_coding.src.lateral_ops import build_lateral_ops
 from causal_coding.src.training import train_step
 from causal_coding.src.vertical_pruning import (
     apply_vertical_gates,
@@ -75,6 +77,16 @@ class CausalCodingMethod:
         adam_eps_vert=1e-8,
         grad_clip_norm_vert=1.0,
         gate_norm="sum",
+
+        # Structured lateral matrix (struct_rho / group size live on the model).
+        lateral_mode="lowrank",
+        struct_learning="fixed",
+        schur_include_structured=False,
+        struct_lr_s=1e-3,
+        struct_lr_b=1e-3,
+        struct_beta_stat=0.99,
+        struct_guard_c=0.5,
+        struct_freeze_after_task1=False,
     ):
         self.lr_z = lr_z
         self.lr_w = lr_w
@@ -141,6 +153,15 @@ class CausalCodingMethod:
         self.grad_clip_norm_vert = grad_clip_norm_vert
         self.vertical_layer_scales_current = ()
 
+        self.lateral_mode = lateral_mode
+        self.struct_learning = struct_learning
+        self.schur_include_structured = schur_include_structured
+        self.struct_lr_s = struct_lr_s
+        self.struct_lr_b = struct_lr_b
+        self.struct_beta_stat = struct_beta_stat
+        self.struct_guard_c = struct_guard_c
+        self.struct_freeze_after_task1 = struct_freeze_after_task1
+
     def _configured_vertical_layer_scales(self, num_weight_layers):
         if len(self.vertical_layer_scales) == num_weight_layers:
             return list(self.vertical_layer_scales)
@@ -199,6 +220,10 @@ class CausalCodingMethod:
             standardize_x=self.vertical_importance_standardize_x,
             task_il_training=task_il_training,
             active_mask=active_mask,
+            lateral_ops=(
+                build_lateral_ops(params, self.lateral_mode, lateral_force_scale)
+                if self.lateral_mode != "lowrank" else None
+            ),
         )
         new_params = dict(params)
         new_params["vertical_importance"] = importance
@@ -218,6 +243,12 @@ class CausalCodingMethod:
         else:
             active_mask = jnp.ones(num_classes)
 
+        if self.lateral_mode in ("structured", "both") and "struct_s" not in params:
+            raise ValueError(
+                "lateral_mode requires structured params; construct the model "
+                "with the same lateral_mode so init_params creates struct_* keys."
+            )
+
         for ep in range(self.epochs):
             if task_idx == 0:
                 lateral_force_scale = ramp_schedule(
@@ -227,6 +258,14 @@ class CausalCodingMethod:
             else:
                 lateral_force_scale = 1.0
                 lateral_lr_scale = 1.0
+
+            # Mirrors lateral_lr_scale: warm-up only on task 0.
+            if task_idx == 0:
+                struct_lr_scale = 1.0 if ep >= self.lat_warmup_epochs else 0.0
+            else:
+                struct_lr_scale = 1.0
+            if self.struct_freeze_after_task1 and task_idx > 0:
+                struct_lr_scale = 0.0
 
             vertical_ramp_scale = ramp_schedule(
                 ep, self.vertical_warmup_epochs, self.vertical_ramp_epochs
@@ -313,6 +352,15 @@ class CausalCodingMethod:
                     active_mask,
                     task_il_training,
                     self.gate_norm,
+                    self.lateral_mode,               # static 47
+                    self.struct_learning,            # static 48
+                    self.schur_include_structured,   # static 49
+                    struct_lr_scale,                 # traced 50
+                    self.struct_lr_s,                # traced 51
+                    self.struct_lr_b,                # traced 52
+                    model.struct_rho,                # traced 53
+                    self.struct_beta_stat,           # traced 54
+                    self.struct_guard_c,             # traced 55
                 )
                 total_loss += loss
 
@@ -323,6 +371,33 @@ class CausalCodingMethod:
                 f"[ramp={lateral_force_scale:.2f}, "
                 f"lr_scale={lateral_lr_scale:.1f}, "
                 f"vert={vertical_lr_scale:.2f}]"
+            )
+
+            # Diagnostic feedforward metrics and weight statistics
+            n_eval = min(2000, int(task.train_X.shape[0]))
+            eval_X = task.train_X[:n_eval]
+            eval_y = task.train_y[:n_eval]
+            logits = model.forward(params, eval_X)
+            lp = jax.nn.log_softmax(logits, axis=1)
+            ff_nll = float(-jnp.mean(lp[jnp.arange(n_eval), eval_y]))
+            ff_acc = float(jnp.mean(jnp.argmax(logits, axis=1) == eval_y))
+
+            active = jnp.array(task.classes)
+            task_logits = logits[:, active]
+            lp_task = jax.nn.log_softmax(task_logits, axis=-1)
+            y_local = jnp.argmax((eval_y[:, None] == active[None, :]).astype(jnp.int32), axis=1)
+            task_nll = float(-jnp.mean(lp_task[jnp.arange(n_eval), y_local]))
+            task_acc = float(jnp.mean(jnp.argmax(task_logits, axis=1) == y_local))
+
+            wf = [float(jnp.linalg.norm(w)) for w in params["weights"]]
+            dead = [float(jnp.mean(jnp.abs(w) < 1e-4)) for w in params["weights"]]
+            wf_str = "[" + ", ".join(f"{x:.2f}" for x in wf) + "]"
+            dead_str = "[" + ", ".join(f"{x:.3f}" for x in dead) + "]"
+
+            print(
+                f"   ff_nll={ff_nll:.4f} ff_acc={ff_acc*100:.2f}% "
+                f"(task_nll={task_nll:.4f} task_acc={task_acc*100:.2f}%) "
+                f"W_fro={wf_str} dead={dead_str}"
             )
 
             if diagnostics_hook is not None:

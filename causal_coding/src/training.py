@@ -17,6 +17,8 @@ from causal_coding.src.lateral import (
     apply_spectral_cap,
     update_cov_ema,
 )
+from causal_coding.src.activations import relu_derivative
+from causal_coding.src.lateral_ops import build_lateral_ops, struct_update
 from causal_coding.src.vertical_pruning import (
     adam_update_vertical,
     apply_vertical_gates,
@@ -25,7 +27,7 @@ from causal_coding.src.vertical_pruning import (
 )
 
 
-@partial(jax.jit, static_argnums=(3, 4, 45, 46))
+@partial(jax.jit, static_argnums=(3, 4, 45, 46, 47, 48, 49))
 def train_step(
     params,
     x_batch,
@@ -74,6 +76,15 @@ def train_step(
     active_mask=None,
     task_il_training=False,
     gate_norm="sum",
+    lateral_mode="lowrank",            # static 47
+    struct_learning="fixed",           # static 48
+    schur_include_structured=False,    # static 49
+    struct_lr_scale=1.0,               # traced 50
+    struct_lr_s=1e-3,                  # traced 51
+    struct_lr_b=1e-3,                  # traced 52
+    struct_rho=0.2,                    # traced 53
+    struct_beta_stat=0.99,             # traced 54
+    struct_guard_c=0.5,                # traced 55
 ):
     weights = params["weights"]
     log_precisions = params["log_precisions"]
@@ -92,9 +103,7 @@ def train_step(
     num_hidden = num_layers - 2
     precisions = [jnp.exp(lp) for lp in log_precisions]
 
-    raw_alphas = [jax.nn.softplus(rho) for rho in lateral_log_alpha_list]
-    eff_alphas = [lateral_force_scale * a for a in raw_alphas]
-    lateral_pairs = list(zip(eff_alphas, lateral_U_list))
+    lateral_pairs = build_lateral_ops(params, lateral_mode, lateral_force_scale)
 
     # Network computations use vertically gated effective weights.
     effective_weights = apply_vertical_gates(
@@ -138,6 +147,9 @@ def train_step(
     output_fisher = compute_output_fisher(
         effective_weights, xs, task_il_training, active_mask
     )
+    hidden_masks = [
+        jnp.mean(relu_derivative(xs[l + 1]), axis=1) for l in range(num_hidden)
+    ]
     A_tildes = compute_local_maps(
         precisions,
         lateral_pairs,
@@ -145,6 +157,8 @@ def train_step(
         ridge,
         output_fisher=output_fisher,
         jacobians_per_sample=jacobians_per_sample,
+        hidden_masks=hidden_masks,
+        include_structured=schur_include_structured,
     )
     # Apply per-sample gates to per-sample Hebbian outer products, then average
     # across the batch.
@@ -214,9 +228,10 @@ def train_step(
             gated_hebbian = gated_hebbian * scale
         delta_w = jnp.mean(gated_hebbian, axis=0)
         gated_delta_w = vertical_eff_gates[l] * delta_w
-        new_weights.append(
-            weights[l] + lr_w * gated_delta_w - lambda_s * jnp.sign(weights[l])
-        )
+
+        cand_w = weights[l] + lr_w * gated_delta_w - lambda_s * jnp.sign(weights[l])
+        new_w = jnp.where(jnp.isfinite(cand_w), cand_w, weights[l])
+        new_weights.append(new_w)
 
     # Update hidden-layer residual precision from early-inference residual
     # variance. Structured relative-D diagonal precision; output precision stays
@@ -237,56 +252,79 @@ def train_step(
         new_log_precisions.append(new_log_pi)
     new_log_precisions.append(log_precisions[-1])
 
-    # Update hidden-state covariance estimates and lateral precision parameters.
-    new_cov_emas = []
-    for l_idx in range(num_hidden):
-        z_l_eq = xs[l_idx + 1]
-        new_cov_emas.append(
-            update_cov_ema(lateral_cov_ema_list[l_idx], z_l_eq, beta_cov)
+    if lateral_mode in ("lowrank", "both"):
+        # Update hidden-state covariance estimates and lateral precision parameters.
+        new_cov_emas = []
+        for l_idx in range(num_hidden):
+            z_l_eq = xs[l_idx + 1]
+            new_cov_emas.append(
+                update_cov_ema(lateral_cov_ema_list[l_idx], z_l_eq, beta_cov)
+            )
+
+        cov_emas_stopgrad = [jax.lax.stop_gradient(C) for C in new_cov_emas]
+
+        def lateral_loss_fn(Us, rhos):
+            return total_lateral_loss(
+                Us,
+                rhos,
+                cov_emas_stopgrad,
+                lateral_force_scale,
+                beta_logdet,
+                eps_lat,
+                lambda_fro,
+                lambda_U,
+                lambda_d,
+                clarity_t,
+                clarity_eps,
+            )
+
+        grad_Us, grad_rhos = jax.grad(lateral_loss_fn, argnums=(0, 1))(
+            lateral_U_list, lateral_log_alpha_list
         )
 
-    cov_emas_stopgrad = [jax.lax.stop_gradient(C) for C in new_cov_emas]
-
-    def lateral_loss_fn(Us, rhos):
-        return total_lateral_loss(
-            Us,
-            rhos,
-            cov_emas_stopgrad,
-            lateral_force_scale,
-            beta_logdet,
-            eps_lat,
-            lambda_fro,
-            lambda_U,
-            lambda_d,
-            clarity_t,
-            clarity_eps,
+        new_lateral_U, new_lateral_rho, new_lateral_adam_states, new_lateral_adam_step = (
+            adam_update_lateral(
+                lateral_U_list,
+                lateral_log_alpha_list,
+                grad_Us,
+                grad_rhos,
+                lateral_adam_states,
+                lateral_adam_step,
+                lr_lat,
+                lateral_lr_scale,
+                beta1=adam_beta1_lat,
+                beta2=adam_beta2_lat,
+                eps=adam_eps_lat,
+                clip_norm=grad_clip_norm_lat,
+            )
         )
 
-    grad_Us, grad_rhos = jax.grad(lateral_loss_fn, argnums=(0, 1))(
-        lateral_U_list, lateral_log_alpha_list
-    )
+        new_lateral_U = [
+            apply_spectral_cap(U, rho, lambda_max_cap)
+            for U, rho in zip(new_lateral_U, new_lateral_rho)
+        ]
 
-    new_lateral_U, new_lateral_rho, new_lateral_adam_states, new_lateral_adam_step = (
-        adam_update_lateral(
-            lateral_U_list,
-            lateral_log_alpha_list,
-            grad_Us,
-            grad_rhos,
-            lateral_adam_states,
-            lateral_adam_step,
-            lr_lat,
-            lateral_lr_scale,
-            beta1=adam_beta1_lat,
-            beta2=adam_beta2_lat,
-            eps=adam_eps_lat,
-            clip_norm=grad_clip_norm_lat,
-        )
-    )
+    else:
+        # Structured-only: low-rank state passes through unchanged.
+        new_lateral_U = params["lateral_U"]
+        new_lateral_rho = params["lateral_log_alpha"]
+        new_cov_emas = params["lateral_cov_ema"]
+        new_lateral_adam_states = params["lateral_adam_states"]
+        new_lateral_adam_step = params["lateral_adam_step"]
 
-    new_lateral_U = [
-        apply_spectral_cap(U, rho, lambda_max_cap)
-        for U, rho in zip(new_lateral_U, new_lateral_rho)
-    ]
+    # Structured lateral: local rule, computed after the precision update so
+    # the guard sees the precisions the next step will run with.
+    if lateral_mode in ("structured", "both"):
+        new_struct = [
+            struct_update(
+                params["struct_s"][l], params["struct_b"][l],
+                params["struct_p_ema"][l], params["struct_q_ema"][l],
+                xs[l + 1], jnp.exp(new_log_precisions[l]),
+                struct_lr_s, struct_lr_b, struct_rho, struct_beta_stat,
+                struct_guard_c, struct_learning, struct_lr_scale,
+            )
+            for l in range(num_hidden)
+        ]
 
     new_params = {
         "weights": new_weights,
@@ -307,6 +345,14 @@ def train_step(
         "vertical_match_loss": vertical_match_loss,
         "vertical_sparse_loss": vertical_sparse_loss,
     }
+    if lateral_mode in ("structured", "both"):
+        new_params.update({
+            "struct_s": [r[0] for r in new_struct],
+            "struct_b": [r[1] for r in new_struct],
+            "struct_p_ema": [r[2] for r in new_struct],
+            "struct_q_ema": [r[3] for r in new_struct],
+            "struct_guard_frac": [r[4] for r in new_struct],
+        })
 
     new_effective_weights = apply_vertical_gates(
         new_weights, new_vertical_gate_logits, vertical_layer_scales
@@ -316,15 +362,17 @@ def train_step(
         # Active-slice BCE: sum over active classes, then average over samples.
         p = jax.nn.sigmoid(prediction)
         bce = -(
-            y_batch.T * jnp.log(p + 1e-8)
-            + (1.0 - y_batch.T) * jnp.log(1.0 - p + 1e-8)
+            y_batch.T * jnp.log(jnp.clip(p, 1e-7, 1.0 - 1e-7))
+            + (1.0 - y_batch.T) * jnp.log(jnp.clip(1.0 - p, 1e-7, 1.0 - 1e-7))
         )
         bce = active_mask[:, None] * bce
         loss = jnp.mean(jnp.sum(bce, axis=0))
+        loss = jnp.where(jnp.isfinite(loss), loss, 0.0)
     else:
         probs = jax.nn.softmax(prediction, axis=0)
-        log_probs = jnp.log(probs + 1e-8)
+        log_probs = jnp.log(jnp.clip(probs, 1e-7, 1.0))
         ce = -jnp.sum(y_batch.T * log_probs, axis=0)
         loss = jnp.mean(ce)
+        loss = jnp.where(jnp.isfinite(loss), loss, 0.0)
 
     return new_params, loss

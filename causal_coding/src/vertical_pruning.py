@@ -180,6 +180,7 @@ def compute_regression_importance(
     standardize_x=False,
     task_il_training=False,
     active_mask=None,
+    lateral_ops=None,
 ):
     """Compute normalized regression importances for all layers.
 
@@ -188,9 +189,12 @@ def compute_regression_importance(
     step so pruning gates are fit against the same output model.
     """
     precisions = [jnp.exp(lp) for lp in log_precisions]
-    lateral_pairs = _build_lateral_pairs(
-        lateral_U_list, lateral_log_alpha_list, lateral_force_scale
-    )
+    if lateral_ops is not None:
+        lateral_pairs = lateral_ops
+    else:
+        lateral_pairs = _build_lateral_pairs(
+            lateral_U_list, lateral_log_alpha_list, lateral_force_scale
+        )
     xs_init = _initialize_xs(weights, x_batch, y_onehot)
     _xs_eq, trajectory = infer_with_trajectory(
         weights,

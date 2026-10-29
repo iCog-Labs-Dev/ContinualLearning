@@ -2,6 +2,7 @@ import jax
 import jax.numpy as jnp
 
 from causal_coding.src.activations import relu, relu_derivative
+from causal_coding.src.lateral_ops import apply_lateral
 
 
 def compute_errors(weights, xs, task_il_training=False, active_mask=None):
@@ -65,9 +66,10 @@ def _infer_step(
         weighted_self = precisions[l - 1][:, None] * errors[l]
         top_down = weights[l].T @ weighted_above * relu_derivative(xs[l])
         # Low-rank lateral: α · U (Uᵀ z), O(d·r·B) vs O(d²·B).
-        alpha_eff, U = lateral_pairs[l - 1]
-        lateral = alpha_eff * (U @ (U.T @ xs[l]))
-        new_xs.append(xs[l] + lr_z * (top_down - weighted_self - lateral))
+        lateral = apply_lateral(lateral_pairs[l - 1], xs[l])
+        z_next = xs[l] + lr_z * (top_down - weighted_self - lateral)
+        z_next = jnp.clip(z_next, -30.0, 30.0)
+        new_xs.append(jnp.where(jnp.isfinite(z_next), z_next, xs[l]))
 
     new_xs.append(xs[-1])
     return new_xs

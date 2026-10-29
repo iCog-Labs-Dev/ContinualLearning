@@ -1,6 +1,12 @@
 import jax
 import jax.numpy as jnp
 
+from causal_coding.src.lateral_ops import (
+    BothLateral,
+    StructLateral,
+    dense_lateral,
+)
+
 from causal_coding.src.activations import relu, relu_derivative
 
 
@@ -63,6 +69,8 @@ def compute_local_maps(
     precisions, lateral_pairs, jacobians, ridge=1e-4,
     output_fisher=None,
     jacobians_per_sample=None,
+    hidden_masks=None,
+    include_structured=False,
 ):
     """Schur–Fisher backward recursion for the per-layer local natural maps.
 
@@ -95,8 +103,11 @@ def compute_local_maps(
         f"edge excluded)."
     )
     for i, pair in enumerate(lateral_pairs):
-        alpha, U = pair
-        assert U.ndim == 2, f"lateral_pairs[{i}] U must be 2D, got shape {U.shape}"
+        if pair is None:
+            continue
+        if not isinstance(pair, (StructLateral, BothLateral)):
+            _alpha, U = pair
+            assert U.ndim == 2, f"lateral_pairs[{i}] U must be 2D, got shape {U.shape}"
 
     def get_lateral(layer_l):
         # layer_l ∈ {1..L} indexes xs[l] inside build_H. lateral_pairs[i] for
@@ -104,8 +115,11 @@ def compute_local_maps(
         # no lateral and returns None.
         i = layer_l - 1
         if 0 <= i < len(lateral_pairs):
-            alpha, U = lateral_pairs[i]
-            return alpha * (U @ U.T)
+            return dense_lateral(
+                lateral_pairs[i],
+                mask=(hidden_masks[i] if hidden_masks is not None else None),
+                include_structured=include_structured,
+            )
         return None
 
     def apply_above_curvature(l, X):
@@ -217,7 +231,7 @@ def compute_causal_gates_per_sample(A_tildes_per_sample, p=2.0, kappa=1e-3):
     same input for a 2D summary of the gate structure.
     """
     gates = []
-    for A_k in A_tildes_per_sample:
+    for l, A_k in enumerate(A_tildes_per_sample):
         assert A_k.ndim == 3, (
             f"compute_causal_gates_per_sample expects (B, d_out, d_in) per "
             f"layer; got shape {A_k.shape}"
