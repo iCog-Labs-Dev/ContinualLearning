@@ -330,16 +330,6 @@ class CausalCodingMethod:
                 batch_X = task.train_X[start:end]
                 batch_y = y_onehot[start:end]
 
-                anchor_X, anchor_y, anchor_mask = None, None, None
-                if self.meta_learning_enabled and len(state.anchor_buffer) > 0:
-                    anchor_X, anchor_y, anchor_mask = sample_anchor_batch(
-                        state.anchor_buffer,
-                        batch_size=min(self.batch_size, 64),
-                        task_il_training=task_il_training,
-                        num_classes=num_classes,
-                        step_seed=ep * num_batch + i,
-                    )
-
                 params, loss = train_step(
                     params,
                     batch_X,
@@ -394,10 +384,6 @@ class CausalCodingMethod:
                     meta_eps_exp,
                     meta_protection,
                     state.consolidated_support_mask if (self.meta_learning_enabled and task_idx > 0) else None,
-                    anchor_X,
-                    anchor_y,
-                    anchor_mask,
-                    self.lambda_anchor if (self.meta_learning_enabled and task_idx > 0) else 0.0,
                 )
                 total_loss += loss
 
