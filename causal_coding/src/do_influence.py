@@ -226,3 +226,128 @@ def compute_causal_gates_per_sample(A_tildes_per_sample, p=2.0, kappa=1e-3):
         denom = jnp.sum(abs_A_p, axis=2, keepdims=True) + kappa    # (B, d_out, 1)
         gates.append(abs_A_p / denom)                              # (B, d_out, d_in)
     return gates
+
+
+def compute_meta_causal_gates_per_sample(
+    A_tildes_per_sample,
+    gate_p=2.0,
+    gate_kappa=1e-3,
+    beta_lcb=1.0,
+    tau=1e-3,
+    eps_exp=0.05,
+    past_support_masks=None,
+    protection_strength=0.8,
+):
+    """Confidence-Aware + Exploratory Causal Gating per sample.
+
+    Extends causal gating with Lower Confidence Bound (LCB) gating,
+    epsilon-exploration to prevent frozen-gate failure modes, and cross-task
+    support protection (Ben Goertzel, 2025, Sections 2.5 and 3.1).
+
+    Args:
+        A_tildes_per_sample: list of (B, d_out, d_in) per-layer per-sample A_tilde tensors.
+        gate_p: exponent for row-normalisation.
+        gate_kappa: stabilizer for row-normalisation.
+        beta_lcb: uncertainty radius multiplier for Lower Confidence Bound.
+        tau: gating threshold.
+        eps_exp: exploration probability mixing factor in [0, 1].
+        past_support_masks: optional list of (d_out, d_in) consolidated support masks.
+        protection_strength: fraction by which past support weights are protected from new gates.
+
+    Returns:
+        gates: list of (B, d_out, d_in) gate tensors.
+        support_masks: list of (d_out, d_in) soft support masks.
+        mu_list: list of (d_out, d_in) point influence expectations.
+        sigma_list: list of (d_out, d_in) influence standard errors.
+    """
+    gates = []
+    support_masks = []
+    mu_list = []
+    sigma_list = []
+
+    for l, A_k in enumerate(A_tildes_per_sample):
+        assert A_k.ndim == 3, (
+            f"compute_meta_causal_gates_per_sample expects (B, d_out, d_in) per "
+            f"layer; got shape {A_k.shape}"
+        )
+        B = A_k.shape[0]
+        abs_A = jnp.abs(A_k)  # (B, d_out, d_in)
+
+        # Batch point influence and sampling uncertainty (Section 3.1)
+        mu = jnp.mean(abs_A, axis=0)  # (d_out, d_in)
+        sigma = jnp.std(abs_A, axis=0) / jnp.sqrt(B + 1e-8)  # (d_out, d_in)
+
+        mu_list.append(mu)
+        sigma_list.append(sigma)
+
+        # LCB and UCB per sample (Section 2.5 & 3.1)
+        lcb_per_sample = jax.nn.relu(abs_A - beta_lcb * sigma[None, :, :] - tau)
+        ucb_per_sample = jax.nn.relu(abs_A + beta_lcb * sigma[None, :, :] - tau)
+
+        # Cross-Task Support Protection before normalization (Fix 2):
+        # Dampen effective influence on previous task supports so gate mass routes to plastic synapses.
+        if past_support_masks is not None and l < len(past_support_masks) and past_support_masks[l] is not None:
+            prot_factor = (1.0 - protection_strength * past_support_masks[l])[None, :, :]
+            lcb_per_sample = lcb_per_sample * prot_factor
+            ucb_per_sample = ucb_per_sample * prot_factor
+
+        # Epsilon-exploration mixing
+        eff_I = (1.0 - eps_exp) * lcb_per_sample + eps_exp * ucb_per_sample
+
+        # Row-normalisation per sample
+        eff_I_p = eff_I ** gate_p
+        denom = jnp.sum(eff_I_p, axis=2, keepdims=True) + gate_kappa
+        gate = eff_I_p / denom  # (B, d_out, d_in)
+
+        gates.append(gate)
+
+        # Soft support mask for current batch (used for locality error epsilon_c)
+        lcb_mean = mu - beta_lcb * sigma
+        scale_l = jax.lax.stop_gradient(jnp.mean(mu) + 1e-6)
+        support_mask = jax.nn.sigmoid(5.0 * (lcb_mean - tau) / scale_l)
+        support_masks.append(support_mask)
+
+    return gates, support_masks, mu_list, sigma_list
+
+
+def compute_meta_causal_gates_from_stats(
+    mu_list,
+    sigma_list,
+    gate_p=2.0,
+    gate_kappa=1e-3,
+    beta_lcb=1.0,
+    tau=1e-3,
+    eps_exp=0.05,
+    past_support_masks=None,
+    protection_strength=0.8,
+):
+    """Computes 2D causal gates from 2D summary statistics mu and sigma (Fix 5).
+
+    Used in meta_step to avoid materializing large 3D (B, d_out, d_in) tensors.
+    """
+    gates = []
+    support_masks = []
+    for l in range(len(mu_list)):
+        mu = mu_list[l]        # (d_out, d_in)
+        sigma = sigma_list[l]  # (d_out, d_in)
+        lcb = jax.nn.relu(mu - beta_lcb * sigma - tau)
+        ucb = jax.nn.relu(mu + beta_lcb * sigma - tau)
+
+        if past_support_masks is not None and l < len(past_support_masks) and past_support_masks[l] is not None:
+            prot_factor = 1.0 - protection_strength * past_support_masks[l]
+            lcb = lcb * prot_factor
+            ucb = ucb * prot_factor
+
+        eff_I = (1.0 - eps_exp) * lcb + eps_exp * ucb
+        eff_I_p = eff_I ** gate_p
+        denom = jnp.sum(eff_I_p, axis=1, keepdims=True) + gate_kappa
+        gate = eff_I_p / denom  # (d_out, d_in)
+        gates.append(gate)
+
+        lcb_mean = mu - beta_lcb * sigma
+        scale_l = jax.lax.stop_gradient(jnp.mean(mu) + 1e-6)
+        support_mask = jax.nn.sigmoid(5.0 * (lcb_mean - tau) / scale_l)
+        support_masks.append(support_mask)
+
+    return gates, support_masks
+

@@ -9,6 +9,7 @@ from causal_coding.src.do_influence import (
     compute_jacobians_per_sample,
     compute_local_maps,
     compute_causal_gates_per_sample,
+    compute_meta_causal_gates_per_sample,
     compute_output_fisher,
 )
 from causal_coding.src.lateral import (
@@ -25,7 +26,7 @@ from causal_coding.src.vertical_pruning import (
 )
 
 
-@partial(jax.jit, static_argnums=(3, 4, 45, 46))
+@partial(jax.jit, static_argnums=(3, 4, 45, 46, 47))
 def train_step(
     params,
     x_batch,
@@ -74,6 +75,16 @@ def train_step(
     active_mask=None,
     task_il_training=False,
     gate_norm="sum",
+    meta_enabled=False,
+    meta_beta_lcb=1.0,
+    meta_tau=1e-3,
+    meta_eps_exp=0.05,
+    meta_protection=0.0,
+    past_support_masks=None,
+    anchor_X=None,
+    anchor_y=None,
+    anchor_active_mask=None,
+    lambda_anchor=0.0,
 ):
     weights = params["weights"]
     log_precisions = params["log_precisions"]
@@ -148,7 +159,27 @@ def train_step(
     )
     # Apply per-sample gates to per-sample Hebbian outer products, then average
     # across the batch.
-    gates_per_sample = compute_causal_gates_per_sample(A_tildes, gate_p, gate_kappa)
+    if meta_enabled:
+        (
+            gates_per_sample,
+            support_masks,
+            mu_list,
+            sigma_list,
+        ) = compute_meta_causal_gates_per_sample(
+            A_tildes,
+            gate_p=gate_p,
+            gate_kappa=gate_kappa,
+            beta_lcb=meta_beta_lcb,
+            tau=meta_tau,
+            eps_exp=meta_eps_exp,
+            past_support_masks=past_support_masks,
+            protection_strength=meta_protection,
+        )
+    else:
+        gates_per_sample = compute_causal_gates_per_sample(A_tildes, gate_p, gate_kappa)
+        support_masks = None
+        mu_list = None
+        sigma_list = None
 
     def vertical_loss_fn(logits):
         total, _match, _sparse = vertical_gate_loss_components(
@@ -193,6 +224,7 @@ def train_step(
     )
 
     new_weights = []
+    delta_ws = []
     for l in range(num_layers - 1):
         weighted_error = precisions[l][:, None] * errors[l + 1]
         # Per-sample Hebbian update, averaged across the batch.
@@ -214,9 +246,54 @@ def train_step(
             gated_hebbian = gated_hebbian * scale
         delta_w = jnp.mean(gated_hebbian, axis=0)
         gated_delta_w = vertical_eff_gates[l] * delta_w
+        if meta_enabled and past_support_masks is not None and l < len(past_support_masks) and past_support_masks[l] is not None:
+            gated_delta_w = gated_delta_w * (1.0 - meta_protection * past_support_masks[l])
+        delta_ws.append(gated_delta_w)
         new_weights.append(
             weights[l] + lr_w * gated_delta_w - lambda_s * jnp.sign(weights[l])
         )
+
+    # Active anchor regularisation under meta-learning
+    if meta_enabled and anchor_X is not None:
+        def anchor_loss_fn(ws):
+            if task_il_training:
+                h_anc = anchor_X.T
+                for l_idx in range(num_layers - 2):
+                    h_anc = ws[l_idx] @ relu(h_anc)
+                pred_anc = ws[-1] @ relu(h_anc)
+                p_anc = jax.nn.sigmoid(pred_anc)
+                bce_anc = -(
+                    anchor_y.T * jnp.log(p_anc + 1e-8)
+                    + (1.0 - anchor_y.T) * jnp.log(1.0 - p_anc + 1e-8)
+                )
+                if anchor_active_mask is not None:
+                    bce_anc = anchor_active_mask.T * bce_anc
+                return jnp.mean(jnp.sum(bce_anc, axis=0))
+            else:
+                X_mix = jnp.concatenate([x_batch, anchor_X], axis=0)
+                y_mix = jnp.concatenate([y_batch, anchor_y], axis=0)
+                h_mix = X_mix.T
+                for l_idx in range(num_layers - 2):
+                    h_mix = ws[l_idx] @ relu(h_mix)
+                pred_mix = ws[-1] @ relu(h_mix)
+                probs_mix = jax.nn.softmax(pred_mix, axis=0)
+                ce_mix = -jnp.sum(y_mix.T * jnp.log(probs_mix + 1e-8), axis=0)
+                return jnp.mean(ce_mix)
+
+        grad_anchor = jax.grad(anchor_loss_fn)(effective_weights)
+        new_weights = [
+            w - lr_w * lambda_anchor * g_anc
+            for w, g_anc in zip(new_weights, grad_anchor)
+        ]
+
+    if meta_enabled and support_masks is not None:
+        eps_locality = sum(
+            jnp.linalg.norm((1.0 - support_masks[l]) * delta_ws[l])
+            / (jnp.linalg.norm(delta_ws[l]) + 1e-8)
+            for l in range(num_layers - 1)
+        ) / (num_layers - 1)
+    else:
+        eps_locality = 0.0
 
     # Update hidden-layer residual precision from early-inference residual
     # variance. Structured relative-D diagonal precision; output precision stays
@@ -307,6 +384,14 @@ def train_step(
         "vertical_match_loss": vertical_match_loss,
         "vertical_sparse_loss": vertical_sparse_loss,
     }
+
+    if meta_enabled:
+        new_params["last_mu_influence"] = mu_list
+        new_params["last_sigma_influence"] = sigma_list
+        new_params["last_support_masks"] = support_masks
+        new_params["last_eps_locality"] = eps_locality
+        new_params["last_xs"] = xs
+        new_params["last_errors"] = errors
 
     new_effective_weights = apply_vertical_gates(
         new_weights, new_vertical_gate_logits, vertical_layer_scales
