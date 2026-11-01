@@ -15,6 +15,7 @@ from causal_coding.src.meta_learner import (
     update_drift_and_detect_shift,
     calibrate_beta_via_intervention,
     compute_locality_and_commutator_proxies,
+    compute_pairwise_confusion_matrix,
     sample_anchor_batch,
     meta_step,
 )
@@ -487,15 +488,14 @@ class CausalCodingMethod:
             ]
             norm_dw = jnp.sqrt(sum(jnp.sum(dw ** 2) for dw in delta_W)) + 1e-8
             norm_dir = [dw / norm_dw for dw in delta_W]
-
-            eps_c, delta_comm, conf_cost = compute_locality_and_commutator_proxies(
-                delta_W,
-                task_support_mask,
-                state.consolidated_support_mask,
-                state.task_update_dirs,
-            )
             state.task_update_dirs.append(norm_dir)
-            state.confusion_graph.append([eps_c, delta_comm, conf_cost])
+
+            # Fix 3: Compute and log the true T x T pairwise confusion matrix delta_hat_{c,c'}
+            state.confusion_graph = compute_pairwise_confusion_matrix(
+                state.task_supports,
+                state.task_update_dirs,
+                state.consolidated_support_mask,
+            )
 
             state.consolidated_support_mask = [
                 jnp.maximum(old, new)

@@ -107,7 +107,7 @@ def update_drift_and_detect_shift(
     mu_list: List[jnp.ndarray],
     short_beta: float = 0.8,
     long_beta: float = 0.95,
-    shift_threshold: float = 0.15,
+    shift_threshold: float = 0.35,
 ) -> Tuple[MetaState, float, bool]:
     """Tracks influence drift D_t and detects mechanism change-points (Section 2.4)."""
     new_short_ema = []
@@ -126,7 +126,8 @@ def update_drift_and_detect_shift(
         new_short_ema.append(s_ema)
         new_long_ema.append(l_ema)
 
-        drift_l = jnp.max(jnp.abs(s_ema - l_ema))
+        # Fix 2: Relative drift normalized by the slow EMA scale
+        drift_l = jnp.mean(jnp.abs(s_ema - l_ema)) / (jnp.mean(jnp.abs(l_ema)) + 1e-6)
         layer_drifts.append(drift_l)
 
     drift_stat = float(jnp.max(jnp.stack(layer_drifts)))
@@ -137,9 +138,10 @@ def update_drift_and_detect_shift(
     meta_state.drift_history.append(drift_stat)
 
     if is_shift_detected:
-        # Mechanism shift detected: reset short EMA to adapt immediately
-        meta_state.short_influence_ema = [jnp.array(mu) for mu in mu_list]
-        # Boost exploration parameter slightly to probe new mechanism
+        # Fix 2: Long-term reference catches up smoothly rather than diverging
+        meta_state.long_influence_ema = [
+            0.5 * s + 0.5 * l for s, l in zip(meta_state.short_influence_ema, meta_state.long_influence_ema)
+        ]
         meta_state.omega["raw_eps_exp"] = jnp.maximum(meta_state.omega["raw_eps_exp"], 0.0)
 
     return meta_state, drift_stat, is_shift_detected
@@ -203,8 +205,10 @@ def calibrate_beta_via_intervention(
         mu = mu_list[l]
         sigma = sigma_list[l]
 
-        # Ambiguous / uncertain synapses: high uncertainty or near threshold tau
-        ambiguity = sigma / (jnp.abs(mu - tau) + 1e-4)
+        # Ambiguous / uncertain synapses: high uncertainty or near threshold eff_tau
+        mean_mu_l = jax.lax.stop_gradient(jnp.mean(mu) + 1e-6)
+        eff_tau = tau * mean_mu_l
+        ambiguity = sigma / (jnp.abs(mu - eff_tau) + 1e-4)
         flat_amb = ambiguity.flatten()
         k = min(32, flat_amb.shape[0])
         thresh = jnp.sort(flat_amb)[-k]
@@ -274,6 +278,42 @@ def compute_locality_and_commutator_proxies(
 
     confusion_cost = 2.0 * eps_c + delta_comm
     return eps_c, delta_comm, confusion_cost
+
+
+def compute_pairwise_confusion_matrix(
+    task_supports: List[List[jnp.ndarray]],
+    task_update_dirs: List[List[jnp.ndarray]],
+    consolidated_mask: Optional[List[jnp.ndarray]] = None,
+) -> List[List[float]]:
+    """Computes the full T x T pairwise confusion matrix delta_hat_{c,c'} across completed tasks (Section 1 & 3.5)."""
+    T = len(task_supports)
+    if T == 0:
+        return []
+    conf_matrix = jnp.zeros((T, T))
+    for i in range(T):
+        for j in range(T):
+            if i == j:
+                continue
+            # Pairwise leakage and commutator defect between task i and task j
+            eps_i = jnp.mean(jnp.array([
+                jnp.linalg.norm((1.0 - task_supports[i][l]) * task_update_dirs[i][l])
+                for l in range(len(task_supports[i]))
+            ]))
+            eps_j = jnp.mean(jnp.array([
+                jnp.linalg.norm((1.0 - task_supports[j][l]) * task_update_dirs[j][l])
+                for l in range(len(task_supports[j]))
+            ]))
+
+            # Overlap defect between task i update and task j support
+            overlap_ij = jnp.mean(jnp.array([
+                jnp.linalg.norm(task_supports[j][l] * task_update_dirs[i][l])
+                for l in range(len(task_supports[i]))
+            ]))
+            cos_ij = sum(jnp.sum(task_update_dirs[i][l] * task_update_dirs[j][l]) for l in range(len(task_supports[i])))
+            delta_ij = overlap_ij + (cos_ij ** 2)
+
+            conf_matrix = conf_matrix.at[i, j].set(2.0 * (eps_i + eps_j) + delta_ij)
+    return conf_matrix.tolist()
 
 
 def sample_anchor_batch(

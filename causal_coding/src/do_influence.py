@@ -280,9 +280,13 @@ def compute_meta_causal_gates_per_sample(
         mu_list.append(mu)
         sigma_list.append(sigma)
 
+        # Scale tau relative to the mean influence magnitude of the layer (Fix 1)
+        mean_mu_l = jax.lax.stop_gradient(jnp.mean(mu) + 1e-6)
+        eff_tau = tau * mean_mu_l
+
         # LCB and UCB per sample (Section 2.5 & 3.1)
-        lcb_per_sample = jax.nn.relu(abs_A - beta_lcb * sigma[None, :, :] - tau)
-        ucb_per_sample = jax.nn.relu(abs_A + beta_lcb * sigma[None, :, :] - tau)
+        lcb_per_sample = jax.nn.relu(abs_A - beta_lcb * sigma[None, :, :] - eff_tau)
+        ucb_per_sample = jax.nn.relu(abs_A + beta_lcb * sigma[None, :, :] - eff_tau)
 
         # Cross-Task Support Protection before normalization (Fix 1):
         # Dampen effective influence on previous task supports gently so eff_I ** gate_p doesn't starve row sum.
@@ -301,13 +305,10 @@ def compute_meta_causal_gates_per_sample(
 
         gates.append(gate)
 
-        # Soft support mask for current batch (Fix 1: top-quantile with hard zero floor)
+        # Soft support mask for current batch (Fix 1: unified relative threshold)
         lcb_mean = mu - beta_lcb * sigma
-        q80 = jax.lax.stop_gradient(jnp.percentile(lcb_mean, 80.0))
-        eff_thresh = jnp.maximum(tau, q80)
-        scale_l = jax.lax.stop_gradient(jnp.std(lcb_mean) + 1e-6)
-        raw_mask = jax.nn.sigmoid(5.0 * (lcb_mean - eff_thresh) / scale_l)
-        support_mask = jnp.where(lcb_mean > eff_thresh, raw_mask, 0.0)
+        scale_l = jax.lax.stop_gradient(jnp.std(lcb_mean) + jnp.mean(mu) + 1e-6)
+        support_mask = jax.nn.sigmoid(5.0 * (lcb_mean - eff_tau) / scale_l) * (lcb_mean > eff_tau).astype(jnp.float32)
         support_masks.append(support_mask)
 
     return gates, support_masks, mu_list, sigma_list
@@ -333,8 +334,13 @@ def compute_meta_causal_gates_from_stats(
     for l in range(len(mu_list)):
         mu = mu_list[l]        # (d_out, d_in)
         sigma = sigma_list[l]  # (d_out, d_in)
-        lcb = jax.nn.relu(mu - beta_lcb * sigma - tau)
-        ucb = jax.nn.relu(mu + beta_lcb * sigma - tau)
+
+        # Scale tau relative to the mean influence magnitude of the layer (Fix 1)
+        mean_mu_l = jax.lax.stop_gradient(jnp.mean(mu) + 1e-6)
+        eff_tau = tau * mean_mu_l
+
+        lcb = jax.nn.relu(mu - beta_lcb * sigma - eff_tau)
+        ucb = jax.nn.relu(mu + beta_lcb * sigma - eff_tau)
 
         if past_support_masks is not None and l < len(past_support_masks) and past_support_masks[l] is not None:
             prot_factor = 1.0 - 0.5 * protection_strength * past_support_masks[l]
@@ -347,12 +353,10 @@ def compute_meta_causal_gates_from_stats(
         gate = eff_I_p / denom  # (d_out, d_in)
         gates.append(gate)
 
+        # Soft support mask for current batch (Fix 1: unified relative threshold)
         lcb_mean = mu - beta_lcb * sigma
-        q80 = jax.lax.stop_gradient(jnp.percentile(lcb_mean, 80.0))
-        eff_thresh = jnp.maximum(tau, q80)
-        scale_l = jax.lax.stop_gradient(jnp.std(lcb_mean) + 1e-6)
-        raw_mask = jax.nn.sigmoid(5.0 * (lcb_mean - eff_thresh) / scale_l)
-        support_mask = jnp.where(lcb_mean > eff_thresh, raw_mask, 0.0)
+        scale_l = jax.lax.stop_gradient(jnp.std(lcb_mean) + jnp.mean(mu) + 1e-6)
+        support_mask = jax.nn.sigmoid(5.0 * (lcb_mean - eff_tau) / scale_l) * (lcb_mean > eff_tau).astype(jnp.float32)
         support_masks.append(support_mask)
 
     return gates, support_masks
