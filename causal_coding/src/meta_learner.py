@@ -54,8 +54,8 @@ def init_meta_state(
     ld_val = float(lambda_d_init / 1e-2)
     raw_lambda_d = jnp.array(jnp.log(jnp.exp(ld_val) - 1.0) if ld_val < 20.0 else ld_val, dtype=jnp.float32)
 
-    # 5. protection = sigmoid(raw_protection) -> raw = logit(protection)
-    p_prot = jnp.clip(jnp.array(protection_init, dtype=jnp.float32), 1e-4, 1.0 - 1e-4)
+    # 5. protection = 0.1 + 0.75 * sigmoid(raw_protection) -> raw = logit((protection - 0.1) / 0.75)
+    p_prot = jnp.clip(jnp.array((protection_init - 0.1) / 0.75, dtype=jnp.float32), 1e-4, 1.0 - 1e-4)
     raw_protection = jnp.log(p_prot / (1.0 - p_prot))
 
     omega = {
@@ -98,7 +98,7 @@ def decode_omega(omega: Dict[str, jnp.ndarray]) -> Tuple[jnp.ndarray, jnp.ndarra
     tau = 1e-2 * jax.nn.sigmoid(omega["raw_tau"])
     eps_exp = 0.25 * jax.nn.sigmoid(omega["raw_eps_exp"])
     lambda_d = 1e-2 * jax.nn.softplus(omega["raw_lambda_d"])
-    protection_strength = jax.nn.sigmoid(omega["raw_protection"])
+    protection_strength = 0.1 + 0.75 * jax.nn.sigmoid(omega["raw_protection"])
     return beta_lcb, tau, eps_exp, lambda_d, protection_strength
 
 
@@ -391,7 +391,8 @@ def meta_step(
             dw = jnp.mean(gated_heb, axis=0)
             gated_dw = vertical_eff_gates[l] * dw
             if past_support is not None and l < len(past_support) and past_support[l] is not None:
-                gated_dw = gated_dw * (1.0 - protection * past_support[l])
+                prot = protection if l < num_layers - 2 else jnp.minimum(0.95, 1.15 * protection)
+                gated_dw = gated_dw * (1.0 - prot * past_support[l])
             w_prime = weights[l] + lr_w * gated_dw - lambda_s * jnp.sign(weights[l])
             w_primes.append(w_prime)
             delta_ws.append(gated_dw)

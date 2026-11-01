@@ -265,6 +265,20 @@ class CausalCodingMethod:
                     lambda_d_init=self.lambda_d if self.lambda_d > 0.0 else 1e-3,
                     protection_init=self.meta_protection_init,
                 )
+            else:
+                task_class_mask = jnp.zeros(num_classes).at[jnp.array(task.classes)].set(1.0)
+                state.consolidated_support_mask[-1] = (
+                    state.consolidated_support_mask[-1] * (1.0 - task_class_mask[:, None])
+                )
+                if "vertical_gate_logits" in params and params["vertical_gate_logits"] is not None:
+                    params["vertical_gate_logits"] = [
+                        jnp.where(
+                            state.consolidated_support_mask[l] > 0.5,
+                            params["vertical_gate_logits"][l],
+                            4.595,
+                        )
+                        for l in range(len(params["vertical_gate_logits"]))
+                    ]
             weights_start = [jnp.array(w) for w in params["weights"]]
 
         for ep in range(self.epochs):
@@ -462,7 +476,9 @@ class CausalCodingMethod:
                 diagnostics_hook(params, ep, epoch_loss)
 
         if self.meta_learning_enabled:
-            task_support_mask = params["last_support_masks"]
+            task_class_mask = jnp.zeros(num_classes).at[jnp.array(task.classes)].set(1.0)
+            task_support_mask = list(params["last_support_masks"])
+            task_support_mask[-1] = task_support_mask[-1] * task_class_mask[:, None]
             state.task_supports.append(task_support_mask)
 
             delta_W = [

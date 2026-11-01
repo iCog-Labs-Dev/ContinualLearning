@@ -243,7 +243,8 @@ def train_step(
         delta_w = jnp.mean(gated_hebbian, axis=0)
         gated_delta_w = vertical_eff_gates[l] * delta_w
         if meta_enabled and past_support_masks is not None and l < len(past_support_masks) and past_support_masks[l] is not None:
-            gated_delta_w = gated_delta_w * (1.0 - meta_protection * past_support_masks[l])
+            prot = meta_protection if l < num_layers - 2 else jnp.minimum(0.95, 1.15 * meta_protection)
+            gated_delta_w = gated_delta_w * (1.0 - prot * past_support_masks[l])
         delta_ws.append(gated_delta_w)
         new_weights.append(
             weights[l] + lr_w * gated_delta_w - lambda_s * jnp.sign(weights[l])

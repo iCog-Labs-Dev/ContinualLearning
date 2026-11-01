@@ -284,10 +284,10 @@ def compute_meta_causal_gates_per_sample(
         lcb_per_sample = jax.nn.relu(abs_A - beta_lcb * sigma[None, :, :] - tau)
         ucb_per_sample = jax.nn.relu(abs_A + beta_lcb * sigma[None, :, :] - tau)
 
-        # Cross-Task Support Protection before normalization (Fix 2):
-        # Dampen effective influence on previous task supports so gate mass routes to plastic synapses.
+        # Cross-Task Support Protection before normalization (Fix 1):
+        # Dampen effective influence on previous task supports gently so eff_I ** gate_p doesn't starve row sum.
         if past_support_masks is not None and l < len(past_support_masks) and past_support_masks[l] is not None:
-            prot_factor = (1.0 - protection_strength * past_support_masks[l])[None, :, :]
+            prot_factor = (1.0 - 0.5 * protection_strength * past_support_masks[l])[None, :, :]
             lcb_per_sample = lcb_per_sample * prot_factor
             ucb_per_sample = ucb_per_sample * prot_factor
 
@@ -301,10 +301,13 @@ def compute_meta_causal_gates_per_sample(
 
         gates.append(gate)
 
-        # Soft support mask for current batch (used for locality error epsilon_c)
+        # Soft support mask for current batch (Fix 1: top-quantile with hard zero floor)
         lcb_mean = mu - beta_lcb * sigma
-        scale_l = jax.lax.stop_gradient(jnp.mean(mu) + 1e-6)
-        support_mask = jax.nn.sigmoid(5.0 * (lcb_mean - tau) / scale_l)
+        q80 = jax.lax.stop_gradient(jnp.percentile(lcb_mean, 80.0))
+        eff_thresh = jnp.maximum(tau, q80)
+        scale_l = jax.lax.stop_gradient(jnp.std(lcb_mean) + 1e-6)
+        raw_mask = jax.nn.sigmoid(5.0 * (lcb_mean - eff_thresh) / scale_l)
+        support_mask = jnp.where(lcb_mean > eff_thresh, raw_mask, 0.0)
         support_masks.append(support_mask)
 
     return gates, support_masks, mu_list, sigma_list
@@ -334,7 +337,7 @@ def compute_meta_causal_gates_from_stats(
         ucb = jax.nn.relu(mu + beta_lcb * sigma - tau)
 
         if past_support_masks is not None and l < len(past_support_masks) and past_support_masks[l] is not None:
-            prot_factor = 1.0 - protection_strength * past_support_masks[l]
+            prot_factor = 1.0 - 0.5 * protection_strength * past_support_masks[l]
             lcb = lcb * prot_factor
             ucb = ucb * prot_factor
 
@@ -345,8 +348,11 @@ def compute_meta_causal_gates_from_stats(
         gates.append(gate)
 
         lcb_mean = mu - beta_lcb * sigma
-        scale_l = jax.lax.stop_gradient(jnp.mean(mu) + 1e-6)
-        support_mask = jax.nn.sigmoid(5.0 * (lcb_mean - tau) / scale_l)
+        q80 = jax.lax.stop_gradient(jnp.percentile(lcb_mean, 80.0))
+        eff_thresh = jnp.maximum(tau, q80)
+        scale_l = jax.lax.stop_gradient(jnp.std(lcb_mean) + 1e-6)
+        raw_mask = jax.nn.sigmoid(5.0 * (lcb_mean - eff_thresh) / scale_l)
+        support_mask = jnp.where(lcb_mean > eff_thresh, raw_mask, 0.0)
         support_masks.append(support_mask)
 
     return gates, support_masks
