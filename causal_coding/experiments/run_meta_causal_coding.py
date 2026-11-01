@@ -1,3 +1,4 @@
+import argparse
 import sys
 import os
 import json
@@ -13,6 +14,16 @@ from src.method import CausalCodingMethod
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Run Meta Causal Coding on Split-MNIST")
+    parser.add_argument("--seed", type=int, default=0, help="Random seed (default: 0)")
+    parser.add_argument("--name", type=str, default=None, help="Experiment name (default: meta_causal_coding or meta_causal_coding_seed<seed>)")
+    args = parser.parse_args()
+
+    seed = args.seed
+    exp_name = args.name if args.name is not None else (f"meta_causal_coding_seed{seed}" if seed != 0 else "meta_causal_coding")
+
+    print(f"Starting Meta Causal Coding experiment: name='{exp_name}', seed={seed}")
+
     # 1. Load Split-MNIST dataset
     X, y, test_X, test_y = load_mnist()
     class_pairs = [[0, 1], [2, 3], [4, 5], [6, 7], [8, 9]]
@@ -25,7 +36,7 @@ def main():
         lateral_init_scale=1e-3,
         alpha_init=0.01,
     )
-    key = jax.random.PRNGKey(0)
+    key = jax.random.PRNGKey(seed)
     params = model.init_params(key)
 
     # 3. Instantiate CausalCodingMethod with meta_learning_enabled=True
@@ -98,11 +109,11 @@ def main():
     )
 
     # 4. Run Benchmark Suite
-    benchmark = CLBenchmark(method=method, model=model, tasks=tasks, name="meta_causal_coding")
+    benchmark = CLBenchmark(method=method, model=model, tasks=tasks, name=exp_name)
     results = benchmark.run(params, None)
 
     # 5. Save meta diagnostics
-    out_dir = os.path.join("results", "meta_causal_coding")
+    out_dir = os.path.join("results", exp_name)
     os.makedirs(out_dir, exist_ok=True)
     diag_path = os.path.join(out_dir, "meta_diagnostics.json")
 
