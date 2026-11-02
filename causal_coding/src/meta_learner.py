@@ -205,10 +205,8 @@ def calibrate_beta_via_intervention(
         mu = mu_list[l]
         sigma = sigma_list[l]
 
-        # Ambiguous / uncertain synapses: high uncertainty or near threshold eff_tau
-        mean_mu_l = jax.lax.stop_gradient(jnp.mean(mu) + 1e-6)
-        eff_tau = tau * mean_mu_l
-        ambiguity = sigma / (jnp.abs(mu - eff_tau) + 1e-4)
+        # Ambiguous / uncertain synapses: high uncertainty or near threshold tau
+        ambiguity = sigma / (jnp.abs(mu - tau) + 1e-4)
         flat_amb = ambiguity.flatten()
         k = min(32, flat_amb.shape[0])
         thresh = jnp.sort(flat_amb)[-k]
