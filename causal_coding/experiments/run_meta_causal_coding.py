@@ -114,7 +114,6 @@ def main():
         meta_eps_exp_init=0.05,
         meta_protection_init=0.8,
         anchor_size_per_task=64,
-        lambda_anchor=0.0,
         meta_alpha_forget=1.0,
         meta_beta_confusion=0.5,
         meta_calibrate_every_epochs=5,

@@ -96,7 +96,6 @@ class CausalCodingMethod:
         meta_eps_exp_init=0.05,
         meta_protection_init=0.8,
         anchor_size_per_task=64,
-        lambda_anchor=0.2,
         meta_alpha_forget=1.0,
         meta_beta_confusion=0.5,
         meta_calibrate_every_epochs=5,
@@ -176,7 +175,6 @@ class CausalCodingMethod:
         self.meta_eps_exp_init = meta_eps_exp_init
         self.meta_protection_init = meta_protection_init
         self.anchor_size_per_task = anchor_size_per_task
-        self.lambda_anchor = lambda_anchor
         self.meta_alpha_forget = meta_alpha_forget
         self.meta_beta_confusion = meta_beta_confusion
         self.meta_calibrate_every_epochs = meta_calibrate_every_epochs
