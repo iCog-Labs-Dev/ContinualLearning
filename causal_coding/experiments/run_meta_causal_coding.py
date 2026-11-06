@@ -1,11 +1,6 @@
 import argparse
 import sys
 import os
-
-# Configure JAX XLA memory allocation before jax import to avoid cuSolver handle exhaustion
-os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
-os.environ.setdefault("XLA_PYTHON_CLIENT_MEM_FRACTION", "0.75")
-
 import json
 import jax
 
