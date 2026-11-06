@@ -250,13 +250,8 @@ class CausalCodingMethod:
 
     def train_task(self, model, params, state, task: Task, task_idx, diagnostics_hook=None):
         import time
-        import tracemalloc
 
         t_task_start = time.time()
-        if not tracemalloc.is_tracing():
-            tracemalloc.start()
-        tracemalloc.reset_peak()
-
         num_classes = model.layer_sizes[-1]
         y_onehot = jnp.eye(num_classes)[task.train_y]
         num_batch = max(1, task.train_X.shape[0] // self.batch_size)
@@ -461,29 +456,6 @@ class CausalCodingMethod:
                         step_seed=ep * num_batch + (num_batch - 1),
                     )
 
-                # Compute per-layer gating, UCB exploration, and reactivation diagnostics
-                layer_diags = []
-                for l in range(len(last_mu)):
-                    mu_l = last_mu[l]
-                    sig_l = last_sigma[l]
-                    sup_l = last_support[l]
-                    lcb_l = jax.nn.relu(mu_l - meta_beta_lcb * sig_l - meta_tau)
-                    ucb_l = jax.nn.relu(mu_l + meta_beta_lcb * sig_l - meta_tau)
-                    exp_mask = (lcb_l <= 0.0) & (ucb_l > 0.0)
-                    exp_rate = float(jnp.mean(exp_mask.astype(jnp.float32)))
-                    sup_dens = float(jnp.mean((sup_l > 0.0).astype(jnp.float32)))
-                    if len(state.task_supports) > 0 and state.consolidated_support_mask[l] is not None:
-                        past_sup = state.consolidated_support_mask[l] > 0.0
-                        react_rate = float(jnp.mean((past_sup & exp_mask).astype(jnp.float32)))
-                    else:
-                        react_rate = 0.0
-                    layer_diags.append({
-                        "layer": int(l),
-                        "exploratory_active_rate": exp_rate,
-                        "support_density": sup_dens,
-                        "reactivated_rate": react_rate,
-                    })
-
                 state.meta_trajectory.append({
                     "epoch": int(ep + 1),
                     "task": int(task_idx),
@@ -495,9 +467,6 @@ class CausalCodingMethod:
                     "eps_locality": float(last_eps_loc),
                     "drift_D": float(drift_stat),
                     "loss": float(epoch_loss),
-                    "gate_align_cos_sim": float(getattr(state, "last_gate_align_cos_sim", 1.0)),
-                    "gate_align_rel_err": float(getattr(state, "last_gate_align_rel_err", 0.0)),
-                    "layer_diagnostics": layer_diags,
                 })
 
                 print(
@@ -556,16 +525,30 @@ class CausalCodingMethod:
             })
             self.last_meta_state = state
 
-            t_task_elapsed = time.time() - t_task_start
-            _, peak_bytes = tracemalloc.get_traced_memory()
-            peak_memory_mb = peak_bytes / (1024 * 1024)
+            # Record final layer gating & exploration stats once at task completion
+            last_mu = params["last_mu_influence"]
+            last_sigma = params["last_sigma_influence"]
+            last_support = params["last_support_masks"]
+            task_layer_diags = []
+            for l in range(len(last_mu)):
+                lcb_l = jax.nn.relu(last_mu[l] - meta_beta_lcb * last_sigma[l] - meta_tau)
+                ucb_l = jax.nn.relu(last_mu[l] + meta_beta_lcb * last_sigma[l] - meta_tau)
+                exp_mask = (lcb_l <= 0.0) & (ucb_l > 0.0)
+                exp_rate = float(jnp.mean(exp_mask.astype(jnp.float32)))
+                sup_dens = float(jnp.mean((last_support[l] > 0.0).astype(jnp.float32)))
+                task_layer_diags.append({
+                    "layer": int(l),
+                    "exploratory_active_rate": exp_rate,
+                    "support_density": sup_dens,
+                })
 
+            t_task_elapsed = time.time() - t_task_start
             if not hasattr(state, "task_overhead"):
                 state.task_overhead = []
             state.task_overhead.append({
                 "task": int(task_idx),
                 "duration_seconds": float(t_task_elapsed),
-                "peak_memory_mb": float(peak_memory_mb),
+                "layer_diagnostics": task_layer_diags,
             })
 
             protocol_key = "task_il" if task_il_training else "class_il"

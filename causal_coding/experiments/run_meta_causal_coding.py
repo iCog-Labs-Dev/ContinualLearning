@@ -22,7 +22,17 @@ def main():
     args = parser.parse_args()
 
     seed = args.seed
-    exp_name = args.name if args.name is not None else (f"meta_causal_coding_seed{seed}" if seed != 0 else "meta_causal_coding")
+    if args.name is not None:
+        exp_name = args.name
+    else:
+        parts = ["meta_causal_coding"]
+        if args.fixed_controller:
+            parts.append("fixed_ctrl")
+        if args.disable_exploration:
+            parts.append("no_exp")
+        if seed != 0:
+            parts.append(f"seed{seed}")
+        exp_name = "_".join(parts)
 
     print(f"Starting Meta Causal Coding experiment: name='{exp_name}', seed={seed}")
 
@@ -130,8 +140,17 @@ def main():
             "confusion_graph": meta_state.confusion_graph if meta_state else [],
         }
 
+    def _json_serial(obj):
+        if hasattr(obj, "tolist"):
+            return obj.tolist()
+        if hasattr(obj, "__float__"):
+            return float(obj)
+        if hasattr(obj, "__int__"):
+            return int(obj)
+        return str(obj)
+
     with open(diag_path, "w", encoding="utf-8") as f:
-        json.dump(diagnostics_data, f, indent=2)
+        json.dump(diagnostics_data, f, indent=2, default=_json_serial)
 
     print(f"Meta-diagnostics saved to {diag_path}")
 

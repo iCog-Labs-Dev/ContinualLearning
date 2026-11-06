@@ -41,8 +41,6 @@ class MetaState:
     confusion_graph: List[List[float]] = field(default_factory=list)
     drift_history: List[float] = field(default_factory=list)
     meta_trajectory: List[Dict[str, float]] = field(default_factory=list)
-    last_gate_align_cos_sim: float = 1.0
-    last_gate_align_rel_err: float = 0.0
 
 
 def init_meta_state(

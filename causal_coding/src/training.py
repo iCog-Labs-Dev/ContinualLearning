@@ -357,7 +357,6 @@ def train_step(
         new_params["last_eps_locality"] = eps_locality
         new_params["last_xs"] = xs
         new_params["last_errors"] = errors
-        new_params["last_delta_ws"] = delta_ws
 
     new_effective_weights = apply_vertical_gates(
         new_weights, new_vertical_gate_logits, vertical_layer_scales
