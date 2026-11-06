@@ -455,6 +455,8 @@ class CausalCodingMethod:
                     "eps_locality": float(last_eps_loc),
                     "drift_D": float(drift_stat),
                     "loss": float(epoch_loss),
+                    "gate_align_cos_sim": float(getattr(state, "last_gate_align_cos_sim", 1.0)),
+                    "gate_align_rel_err": float(getattr(state, "last_gate_align_rel_err", 0.0)),
                 })
 
                 print(

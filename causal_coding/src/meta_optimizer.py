@@ -316,5 +316,44 @@ def meta_step(
 
     meta_state.omega = new_omega
     meta_state.adam_state = new_adam
+
+    # Quantify directional alignment between sample-wise training update and batch-stat lookahead
+    last_dws = params.get("last_delta_ws", None)
+    if last_dws is not None:
+        b_lcb, t_val, e_exp, _, prot = decode_omega(new_omega)
+        cand_gates, _ = compute_meta_causal_gates_from_stats(
+            mu_list,
+            sigma_list,
+            gate_p=gate_p,
+            gate_kappa=gate_kappa,
+            beta_lcb=b_lcb,
+            tau=t_val,
+            eps_exp=e_exp,
+            past_support_masks=past_support,
+            protection_strength=prot,
+        )
+        _, cand_dws = _compute_candidate_lookahead_weights(
+            weights=weights,
+            gates=cand_gates,
+            precisions=precisions,
+            errors=errors,
+            xs=xs,
+            vertical_eff_gates=vertical_eff_gates,
+            past_support=past_support,
+            protection=prot,
+            lr_w=lr_w,
+            lambda_s=lambda_s,
+            gate_norm=gate_norm,
+        )
+        dot_prod = sum(jnp.sum(dw_act * dw_cand) for dw_act, dw_cand in zip(last_dws, cand_dws))
+        norm_act = jnp.sqrt(sum(jnp.sum(dw_act ** 2) for dw_act in last_dws) + 1e-12)
+        norm_cand = jnp.sqrt(sum(jnp.sum(dw_cand ** 2) for dw_cand in cand_dws) + 1e-12)
+        diff_norm = jnp.sqrt(sum(jnp.sum((dw_act - dw_cand) ** 2) for dw_act, dw_cand in zip(last_dws, cand_dws)) + 1e-12)
+        meta_state.last_gate_align_cos_sim = float(dot_prod / (norm_act * norm_cand))
+        meta_state.last_gate_align_rel_err = float(diff_norm / norm_act)
+    else:
+        meta_state.last_gate_align_cos_sim = 1.0
+        meta_state.last_gate_align_rel_err = 0.0
+
     return meta_state
 
