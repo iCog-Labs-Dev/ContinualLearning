@@ -143,20 +143,23 @@ def compute_local_maps(
         PJ_batch = apply_above_curvature(l, jacobians[l])
         G_bar_next_reg = G_bar_next + ridge * jnp.eye(G_bar_next.shape[0])
 
+        # Symmetrize and invert G_bar_next_reg once as a 2D matrix.
+        # This completely avoids calling batched 3D cuSOLVER (cusolverDnBatched)
+        # on the GPU, which fails with internal handle errors in cloud/container environments.
+        G_bar_next_reg = 0.5 * (G_bar_next_reg + G_bar_next_reg.T)
+        inv_G = jnp.linalg.inv(G_bar_next_reg)
+
         if use_per_sample:
-            # Per-sample RHS: apply Π to each J^{(b)} then solve against the
-            # shared batch-averaged Ḡ. `jnp.linalg.solve` broadcasts over the
-            # leading batch dim (LU-decomposes Ḡ once, back-substitutes for B
-            # right-hand sides).
+            # Per-sample RHS: apply Π to each J^{(b)} then multiply by inv(Ḡ).
             J_per = jacobians_per_sample[l]                       # (B, d_out, d_in)
             PJ_per = jax.vmap(lambda J: apply_above_curvature(l, J))(J_per)
-            A_tildes[l] = jnp.linalg.solve(G_bar_next_reg, PJ_per)  # (B, d_out, d_in)
+            A_tildes[l] = jnp.einsum("ij,bjk->bik", inv_G, PJ_per)  # (B, d_out, d_in)
         else:
-            A_tildes[l] = jnp.linalg.solve(G_bar_next_reg, PJ_batch)  # (d_out, d_in)
+            A_tildes[l] = inv_G @ PJ_batch  # (d_out, d_in)
 
         if l > 0:
             # Schur update: uses the batch-averaged PJ (Fisher metric semantics).
-            schur = PJ_batch.T @ jnp.linalg.solve(G_bar_next_reg, PJ_batch)
+            schur = PJ_batch.T @ (inv_G @ PJ_batch)
             G_bar_next = build_H(l) - schur
 
     return A_tildes
