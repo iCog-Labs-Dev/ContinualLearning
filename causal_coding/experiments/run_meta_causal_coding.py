@@ -1,6 +1,10 @@
 import argparse
 import sys
 import os
+
+# Prevent JAX from preallocating all GPU memory so cuSolver and CUDA runtime have workspace
+os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
+
 import json
 import jax
 
