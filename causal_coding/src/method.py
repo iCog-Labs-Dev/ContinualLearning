@@ -100,6 +100,8 @@ class CausalCodingMethod:
         meta_alpha_forget=1.0,
         meta_beta_confusion=0.5,
         meta_calibrate_every_epochs=5,
+        fixed_controller=False,
+        disable_exploration=False,
     ):
         self.lr_z = lr_z
         self.lr_w = lr_w
@@ -178,6 +180,10 @@ class CausalCodingMethod:
         self.meta_alpha_forget = meta_alpha_forget
         self.meta_beta_confusion = meta_beta_confusion
         self.meta_calibrate_every_epochs = meta_calibrate_every_epochs
+        self.fixed_controller = fixed_controller
+        self.disable_exploration = disable_exploration
+        if self.disable_exploration:
+            self.meta_eps_exp_init = 0.0
 
     def _configured_vertical_layer_scales(self, num_weight_layers):
         if len(self.vertical_layer_scales) == num_weight_layers:
@@ -243,6 +249,14 @@ class CausalCodingMethod:
         return new_params
 
     def train_task(self, model, params, state, task: Task, task_idx, diagnostics_hook=None):
+        import time
+        import tracemalloc
+
+        t_task_start = time.time()
+        if not tracemalloc.is_tracing():
+            tracemalloc.start()
+        tracemalloc.reset_peak()
+
         num_classes = model.layer_sizes[-1]
         y_onehot = jnp.eye(num_classes)[task.train_y]
         num_batch = max(1, task.train_X.shape[0] // self.batch_size)
@@ -330,6 +344,8 @@ class CausalCodingMethod:
                     meta_lambda_d,
                     meta_protection,
                 ) = decode_omega(state.omega)
+                if self.disable_exploration:
+                    meta_eps_exp = 0.0
                 eff_lambda_d = meta_lambda_d
             else:
                 eff_lambda_d = self.lambda_d
@@ -412,37 +428,61 @@ class CausalCodingMethod:
 
                 state, drift_stat, is_shift = update_drift_and_detect_shift(state, last_mu)
 
-                if (ep + 1) % self.meta_calibrate_every_epochs == 0:
-                    probe_n = min(32, task.train_X.shape[0])
-                    state = calibrate_beta_via_intervention(
+                if not self.fixed_controller:
+                    if (ep + 1) % self.meta_calibrate_every_epochs == 0:
+                        probe_n = min(32, task.train_X.shape[0])
+                        state = calibrate_beta_via_intervention(
+                            model,
+                            params,
+                            state,
+                            task.train_X[:probe_n],
+                            y_onehot[:probe_n],
+                            last_mu,
+                            last_sigma,
+                            active_classes=task.classes if task_il_training else None,
+                        )
+
+                    state = meta_step(
                         model,
                         params,
                         state,
-                        task.train_X[:probe_n],
-                        y_onehot[:probe_n],
-                        last_mu,
-                        last_sigma,
-                        active_classes=task.classes if task_il_training else None,
+                        batch_X,
+                        batch_y,
+                        active_mask,
+                        task_il_training,
+                        self.lr_w,
+                        self.lambda_s,
+                        self.gate_p,
+                        self.gate_kappa,
+                        gate_norm=self.gate_norm,
+                        alpha_forget=self.meta_alpha_forget,
+                        beta_confusion=self.meta_beta_confusion,
+                        lr_meta=self.lr_meta,
+                        step_seed=ep * num_batch + (num_batch - 1),
                     )
 
-                state = meta_step(
-                    model,
-                    params,
-                    state,
-                    batch_X,
-                    batch_y,
-                    active_mask,
-                    task_il_training,
-                    self.lr_w,
-                    self.lambda_s,
-                    self.gate_p,
-                    self.gate_kappa,
-                    gate_norm=self.gate_norm,
-                    alpha_forget=self.meta_alpha_forget,
-                    beta_confusion=self.meta_beta_confusion,
-                    lr_meta=self.lr_meta,
-                    step_seed=ep * num_batch + (num_batch - 1),
-                )
+                # Compute per-layer gating, UCB exploration, and reactivation diagnostics
+                layer_diags = []
+                for l in range(len(last_mu)):
+                    mu_l = last_mu[l]
+                    sig_l = last_sigma[l]
+                    sup_l = last_support[l]
+                    lcb_l = jax.nn.relu(mu_l - meta_beta_lcb * sig_l - meta_tau)
+                    ucb_l = jax.nn.relu(mu_l + meta_beta_lcb * sig_l - meta_tau)
+                    exp_mask = (lcb_l <= 0.0) & (ucb_l > 0.0)
+                    exp_rate = float(jnp.mean(exp_mask.astype(jnp.float32)))
+                    sup_dens = float(jnp.mean((sup_l > 0.0).astype(jnp.float32)))
+                    if len(state.task_supports) > 0 and state.consolidated_support_mask[l] is not None:
+                        past_sup = state.consolidated_support_mask[l] > 0.0
+                        react_rate = float(jnp.mean((past_sup & exp_mask).astype(jnp.float32)))
+                    else:
+                        react_rate = 0.0
+                    layer_diags.append({
+                        "layer": int(l),
+                        "exploratory_active_rate": exp_rate,
+                        "support_density": sup_dens,
+                        "reactivated_rate": react_rate,
+                    })
 
                 state.meta_trajectory.append({
                     "epoch": int(ep + 1),
@@ -457,6 +497,7 @@ class CausalCodingMethod:
                     "loss": float(epoch_loss),
                     "gate_align_cos_sim": float(getattr(state, "last_gate_align_cos_sim", 1.0)),
                     "gate_align_rel_err": float(getattr(state, "last_gate_align_rel_err", 0.0)),
+                    "layer_diagnostics": layer_diags,
                 })
 
                 print(
@@ -514,6 +555,19 @@ class CausalCodingMethod:
                 "task_idx": task_idx,
             })
             self.last_meta_state = state
+
+            t_task_elapsed = time.time() - t_task_start
+            _, peak_bytes = tracemalloc.get_traced_memory()
+            peak_memory_mb = peak_bytes / (1024 * 1024)
+
+            if not hasattr(state, "task_overhead"):
+                state.task_overhead = []
+            state.task_overhead.append({
+                "task": int(task_idx),
+                "duration_seconds": float(t_task_elapsed),
+                "peak_memory_mb": float(peak_memory_mb),
+            })
+
             protocol_key = "task_il" if task_il_training else "class_il"
             if not hasattr(self, "meta_diagnostics"):
                 self.meta_diagnostics = {}
@@ -521,6 +575,7 @@ class CausalCodingMethod:
                 "trajectory": list(state.meta_trajectory),
                 "drift_history": list(state.drift_history),
                 "confusion_graph": list(state.confusion_graph),
+                "task_overhead": list(state.task_overhead),
             }
 
         return params, state, total_loss / num_batch

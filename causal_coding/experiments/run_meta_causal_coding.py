@@ -17,6 +17,8 @@ def main():
     parser = argparse.ArgumentParser(description="Run Meta Causal Coding on Split-MNIST")
     parser.add_argument("--seed", type=int, default=0, help="Random seed (default: 0)")
     parser.add_argument("--name", type=str, default=None, help="Experiment name (default: meta_causal_coding or meta_causal_coding_seed<seed>)")
+    parser.add_argument("--fixed-controller", action="store_true", help="Freeze meta-controller parameters at initial values (ablation baseline)")
+    parser.add_argument("--disable-exploration", action="store_true", help="Disable UCB exploration bonus by enforcing eps_exp=0 (ablation baseline)")
     args = parser.parse_args()
 
     seed = args.seed
@@ -106,6 +108,8 @@ def main():
         meta_alpha_forget=1.0,
         meta_beta_confusion=0.5,
         meta_calibrate_every_epochs=5,
+        fixed_controller=args.fixed_controller,
+        disable_exploration=args.disable_exploration,
     )
 
     # 4. Run Benchmark Suite
