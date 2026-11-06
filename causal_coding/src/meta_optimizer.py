@@ -282,13 +282,15 @@ def meta_step(
             gate_norm=gate_norm,
         )
 
-        pred_curr = _forward_eval(w_primes, curr_X)
+        eff_w_primes = [G * W for W, G in zip(w_primes, vertical_eff_gates)]
+
+        pred_curr = _forward_eval(eff_w_primes, curr_X)
         loss_curr = _compute_classification_loss(
             pred_curr, curr_y, task_il_training=task_il_training, active_mask=active_mask
         )
 
         if anchor_X is not None and anchor_y is not None:
-            pred_anc = _forward_eval(w_primes, anchor_X)
+            pred_anc = _forward_eval(eff_w_primes, anchor_X)
             loss_anchor = _compute_classification_loss(
                 pred_anc, anchor_y, task_il_training=task_il_training, active_mask=anchor_mask
             )
