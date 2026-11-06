@@ -8,6 +8,7 @@ from causal_coding.src.activations import relu
 from causal_coding.src.do_influence import compute_meta_causal_gates_from_stats
 from causal_coding.src.lateral import lateral_clarity_loss
 from causal_coding.src.vertical_pruning import effective_vertical_gates
+from core.metrics import _binary_cross_entropy
 
 
 def decode_omega(
@@ -41,16 +42,15 @@ def _compute_classification_loss(
     task_il_training: bool,
     active_mask: jnp.ndarray,
 ) -> jnp.ndarray:
-    """Computes Task-IL active-slice BCE or Class-IL categorical cross-entropy."""
+    """Computes Task-IL active-slice BCE or Class-IL categorical cross-entropy directly from logits."""
+    logits_b = logits.T
     if task_il_training:
-        probs = jax.nn.sigmoid(logits)
-        bce = -(targets.T * jnp.log(probs + 1e-8) + (1.0 - targets.T) * jnp.log(1.0 - probs + 1e-8))
-        mask = active_mask[:, None] if active_mask.ndim == 1 else active_mask.T
-        bce = mask * bce
-        return jnp.mean(jnp.sum(bce, axis=0))
+        mask = active_mask[None, :] if active_mask.ndim == 1 else active_mask
+        bce = _binary_cross_entropy(logits_b, targets)
+        return jnp.mean(jnp.sum(mask * bce, axis=-1))
     else:
-        probs = jax.nn.softmax(logits, axis=0)
-        return jnp.mean(-jnp.sum(targets.T * jnp.log(probs + 1e-8), axis=0))
+        log_probs = jax.nn.log_softmax(logits_b, axis=-1)
+        return -jnp.mean(jnp.sum(targets * log_probs, axis=-1))
 
 
 def _compute_candidate_lookahead_weights(
