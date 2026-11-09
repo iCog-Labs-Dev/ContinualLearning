@@ -1,8 +1,9 @@
+import os
+import urllib.request
 from dataclasses import dataclass
 import jax
 import jax.numpy as jnp
 import numpy as np
-from tensorflow.keras.datasets import mnist
 
 
 @dataclass
@@ -15,7 +16,18 @@ class Task:
 
 
 def load_mnist():
-    (train_X, train_y), (test_X, test_y) = mnist.load_data()
+    cache_dir = os.path.expanduser("~/.keras/datasets")
+    os.makedirs(cache_dir, exist_ok=True)
+    cache_path = os.path.join(cache_dir, "mnist.npz")
+    if not os.path.exists(cache_path):
+        url = "https://storage.googleapis.com/tensorflow/tf-keras-datasets/mnist.npz"
+        print(f"Downloading MNIST dataset to {cache_path}...")
+        urllib.request.urlretrieve(url, cache_path)
+
+    with np.load(cache_path, allow_pickle=True) as f:
+        train_X, train_y = f["x_train"], f["y_train"]
+        test_X, test_y = f["x_test"], f["y_test"]
+
     train_X = train_X.reshape(-1, 784) / 255.0
     test_X = test_X.reshape(-1, 784) / 255.0
 

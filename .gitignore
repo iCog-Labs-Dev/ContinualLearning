@@ -8,3 +8,9 @@ __pycache__/
 .ipynb_checkpoints/
 
 results/
+*.txt
+generate_bundle.py
+meta_learner_review_bundle.md
+
+docs/
+causal_coding/result/

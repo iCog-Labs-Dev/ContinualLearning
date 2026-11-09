@@ -1,3 +1,4 @@
+import jax
 import jax.numpy as jnp
 
 from core.data import Task
@@ -6,6 +7,17 @@ from causal_coding.src.training import train_step
 from causal_coding.src.vertical_pruning import (
     apply_vertical_gates,
     compute_regression_importance,
+)
+from causal_coding.src.meta_learner import (
+    MetaState,
+    init_meta_state,
+    decode_omega,
+    update_drift_and_detect_shift,
+    calibrate_beta_via_intervention,
+    compute_locality_and_commutator_proxies,
+    compute_pairwise_confusion_matrix,
+    sample_anchor_batch,
+    meta_step,
 )
 
 
@@ -75,6 +87,20 @@ class CausalCodingMethod:
         adam_eps_vert=1e-8,
         grad_clip_norm_vert=1.0,
         gate_norm="sum",
+
+        # Meta-learning settings (Goertzel 2025)
+        meta_learning_enabled=False,
+        lr_meta=1e-2,
+        meta_beta_lcb_init=1.0,
+        meta_tau_init=1e-3,
+        meta_eps_exp_init=0.05,
+        meta_protection_init=0.8,
+        anchor_size_per_task=64,
+        meta_alpha_forget=1.0,
+        meta_beta_confusion=0.5,
+        meta_calibrate_every_epochs=5,
+        fixed_controller=False,
+        disable_exploration=False,
     ):
         self.lr_z = lr_z
         self.lr_w = lr_w
@@ -141,6 +167,22 @@ class CausalCodingMethod:
         self.grad_clip_norm_vert = grad_clip_norm_vert
         self.vertical_layer_scales_current = ()
 
+        # Meta-learning attributes
+        self.meta_learning_enabled = meta_learning_enabled
+        self.lr_meta = lr_meta
+        self.meta_beta_lcb_init = meta_beta_lcb_init
+        self.meta_tau_init = meta_tau_init
+        self.meta_eps_exp_init = meta_eps_exp_init
+        self.meta_protection_init = meta_protection_init
+        self.anchor_size_per_task = anchor_size_per_task
+        self.meta_alpha_forget = meta_alpha_forget
+        self.meta_beta_confusion = meta_beta_confusion
+        self.meta_calibrate_every_epochs = meta_calibrate_every_epochs
+        self.fixed_controller = fixed_controller
+        self.disable_exploration = disable_exploration
+        if self.disable_exploration:
+            self.meta_eps_exp_init = 0.0
+
     def _configured_vertical_layer_scales(self, num_weight_layers):
         if len(self.vertical_layer_scales) == num_weight_layers:
             return list(self.vertical_layer_scales)
@@ -205,9 +247,12 @@ class CausalCodingMethod:
         return new_params
 
     def train_task(self, model, params, state, task: Task, task_idx, diagnostics_hook=None):
+        import time
+
+        t_task_start = time.time()
         num_classes = model.layer_sizes[-1]
         y_onehot = jnp.eye(num_classes)[task.train_y]
-        num_batch = task.train_X.shape[0] // self.batch_size
+        num_batch = max(1, task.train_X.shape[0] // self.batch_size)
 
         # Task-IL uses an independent-Bernoulli output edge restricted to the
         # task's active classes. Class-IL uses the full categorical softmax
@@ -217,6 +262,32 @@ class CausalCodingMethod:
             active_mask = jnp.zeros(num_classes).at[jnp.array(task.classes)].set(1.0)
         else:
             active_mask = jnp.ones(num_classes)
+
+        if self.meta_learning_enabled:
+            if state is None or task_idx == 0:
+                state = init_meta_state(
+                    params,
+                    beta_lcb_init=self.meta_beta_lcb_init,
+                    tau_init=self.meta_tau_init,
+                    eps_exp_init=self.meta_eps_exp_init,
+                    lambda_d_init=self.lambda_d if self.lambda_d > 0.0 else 1e-3,
+                    protection_init=self.meta_protection_init,
+                )
+            else:
+                task_class_mask = jnp.zeros(num_classes).at[jnp.array(task.classes)].set(1.0)
+                state.consolidated_support_mask[-1] = (
+                    state.consolidated_support_mask[-1] * (1.0 - task_class_mask[:, None])
+                )
+                if "vertical_gate_logits" in params and params["vertical_gate_logits"] is not None:
+                    params["vertical_gate_logits"] = [
+                        jnp.where(
+                            state.consolidated_support_mask[l] > 0.5,
+                            params["vertical_gate_logits"][l],
+                            4.595,
+                        )
+                        for l in range(len(params["vertical_gate_logits"]))
+                    ]
+            weights_start = [jnp.array(w) for w in params["weights"]]
 
         for ep in range(self.epochs):
             if task_idx == 0:
@@ -258,6 +329,24 @@ class CausalCodingMethod:
                     active_mask=active_mask,
                 )
 
+            if self.meta_learning_enabled:
+                (
+                    meta_beta_lcb,
+                    meta_tau,
+                    meta_eps_exp,
+                    meta_lambda_d,
+                    meta_protection,
+                ) = decode_omega(state.omega)
+                if self.disable_exploration:
+                    meta_eps_exp = 0.0
+                eff_lambda_d = meta_lambda_d
+            else:
+                eff_lambda_d = self.lambda_d
+                meta_beta_lcb = 1.0
+                meta_tau = 1e-3
+                meta_eps_exp = 0.05
+                meta_protection = 0.0
+
             total_loss = 0.0
             for i in range(num_batch):
                 start = i * self.batch_size
@@ -291,7 +380,7 @@ class CausalCodingMethod:
                     self.adam_beta2_lat,
                     self.adam_eps_lat,
                     self.grad_clip_norm_lat,
-                    self.lambda_d,
+                    eff_lambda_d,
                     self.clarity_t,
                     self.clarity_eps,
                     vertical_lr_scale,
@@ -313,19 +402,161 @@ class CausalCodingMethod:
                     active_mask,
                     task_il_training,
                     self.gate_norm,
+                    self.meta_learning_enabled,
+                    meta_beta_lcb,
+                    meta_tau,
+                    meta_eps_exp,
+                    meta_protection,
+                    state.consolidated_support_mask if (self.meta_learning_enabled and task_idx > 0) else None,
                 )
                 total_loss += loss
 
             epoch_loss = total_loss / num_batch
-            print(
-                f"Epoch {ep + 1} ========= "
-                f"Loss: {epoch_loss}  "
-                f"[ramp={lateral_force_scale:.2f}, "
-                f"lr_scale={lateral_lr_scale:.1f}, "
-                f"vert={vertical_lr_scale:.2f}]"
-            )
+
+            if self.meta_learning_enabled:
+                last_mu = params["last_mu_influence"]
+                last_sigma = params["last_sigma_influence"]
+                last_support = params["last_support_masks"]
+                last_eps_loc = params["last_eps_locality"]
+
+                state, drift_stat, is_shift = update_drift_and_detect_shift(state, last_mu)
+
+                if not self.fixed_controller:
+                    if (ep + 1) % self.meta_calibrate_every_epochs == 0:
+                        probe_n = min(32, task.train_X.shape[0])
+                        state = calibrate_beta_via_intervention(
+                            model,
+                            params,
+                            state,
+                            task.train_X[:probe_n],
+                            y_onehot[:probe_n],
+                            last_mu,
+                            last_sigma,
+                            active_classes=task.classes if task_il_training else None,
+                        )
+
+                    state = meta_step(
+                        model,
+                        params,
+                        state,
+                        batch_X,
+                        batch_y,
+                        active_mask,
+                        task_il_training,
+                        self.lr_w,
+                        self.lambda_s,
+                        self.gate_p,
+                        self.gate_kappa,
+                        gate_norm=self.gate_norm,
+                        alpha_forget=self.meta_alpha_forget,
+                        beta_confusion=self.meta_beta_confusion,
+                        lr_meta=self.lr_meta,
+                        step_seed=ep * num_batch + (num_batch - 1),
+                    )
+
+                state.meta_trajectory.append({
+                    "epoch": int(ep + 1),
+                    "task": int(task_idx),
+                    "beta_lcb": float(meta_beta_lcb),
+                    "tau": float(meta_tau),
+                    "eps_exp": float(meta_eps_exp),
+                    "lambda_d": float(eff_lambda_d),
+                    "protection": float(meta_protection),
+                    "eps_locality": float(last_eps_loc),
+                    "drift_D": float(drift_stat),
+                    "loss": float(epoch_loss),
+                })
+
+                print(
+                    f"Epoch {ep + 1} ========= "
+                    f"Loss: {epoch_loss:.5f}  "
+                    f"[beta_lcb={float(meta_beta_lcb):.3f}, tau={float(meta_tau):.4f}, "
+                    f"eps_exp={float(meta_eps_exp):.3f}, lambda_d={float(eff_lambda_d):.4f}, "
+                    f"eps_loc={float(last_eps_loc):.4f}, drift_D={float(drift_stat):.4f}]"
+                )
+            else:
+                print(
+                    f"Epoch {ep + 1} ========= "
+                    f"Loss: {epoch_loss}  "
+                    f"[ramp={lateral_force_scale:.2f}, "
+                    f"lr_scale={lateral_lr_scale:.1f}, "
+                    f"vert={vertical_lr_scale:.2f}]"
+                )
 
             if diagnostics_hook is not None:
                 diagnostics_hook(params, ep, epoch_loss)
+
+        if self.meta_learning_enabled:
+            task_class_mask = jnp.zeros(num_classes).at[jnp.array(task.classes)].set(1.0)
+            task_support_mask = list(params["last_support_masks"])
+            task_support_mask[-1] = task_support_mask[-1] * task_class_mask[:, None]
+            state.task_supports.append(task_support_mask)
+
+            delta_W = [
+                w_end - w_start
+                for w_end, w_start in zip(params["weights"], weights_start)
+            ]
+            norm_dw = jnp.sqrt(sum(jnp.sum(dw ** 2) for dw in delta_W)) + 1e-8
+            norm_dir = [dw / norm_dw for dw in delta_W]
+            state.task_update_dirs.append(norm_dir)
+
+            # Fix 3: Compute and log the true T x T pairwise confusion matrix delta_hat_{c,c'}
+            state.confusion_graph = compute_pairwise_confusion_matrix(
+                state.task_supports,
+                state.task_update_dirs,
+                state.consolidated_support_mask,
+            )
+
+            state.consolidated_support_mask = [
+                jnp.maximum(old, new)
+                for old, new in zip(state.consolidated_support_mask, task_support_mask)
+            ]
+
+            n_anc = min(self.anchor_size_per_task, task.train_X.shape[0])
+            anc_key = jax.random.PRNGKey(task_idx * 1000 + 42)
+            anc_indices = jax.random.permutation(anc_key, task.train_X.shape[0])[:n_anc]
+            state.anchor_buffer.append({
+                "X": task.train_X[anc_indices],
+                "y": y_onehot[anc_indices],
+                "classes": task.classes,
+                "task_idx": task_idx,
+            })
+            self.last_meta_state = state
+
+            # Record final layer gating & exploration stats once at task completion
+            last_mu = params["last_mu_influence"]
+            last_sigma = params["last_sigma_influence"]
+            last_support = params["last_support_masks"]
+            task_layer_diags = []
+            for l in range(len(last_mu)):
+                lcb_l = jax.nn.relu(last_mu[l] - meta_beta_lcb * last_sigma[l] - meta_tau)
+                ucb_l = jax.nn.relu(last_mu[l] + meta_beta_lcb * last_sigma[l] - meta_tau)
+                exp_mask = (lcb_l <= 0.0) & (ucb_l > 0.0)
+                exp_rate = float(jnp.mean(exp_mask.astype(jnp.float32)))
+                sup_dens = float(jnp.mean((last_support[l] > 0.0).astype(jnp.float32)))
+                task_layer_diags.append({
+                    "layer": int(l),
+                    "exploratory_active_rate": exp_rate,
+                    "support_density": sup_dens,
+                })
+
+            t_task_elapsed = time.time() - t_task_start
+            if not hasattr(state, "task_overhead"):
+                state.task_overhead = []
+            state.task_overhead.append({
+                "task": int(task_idx),
+                "duration_seconds": float(t_task_elapsed),
+                "layer_diagnostics": task_layer_diags,
+            })
+
+            protocol_key = "task_il" if task_il_training else "class_il"
+            if not hasattr(self, "meta_diagnostics"):
+                self.meta_diagnostics = {}
+            self.meta_diagnostics[protocol_key] = {
+                "trajectory": list(state.meta_trajectory),
+                "drift_history": list(state.drift_history),
+                "confusion_graph": list(state.confusion_graph),
+                "task_overhead": list(state.task_overhead),
+            }
 
         return params, state, total_loss / num_batch

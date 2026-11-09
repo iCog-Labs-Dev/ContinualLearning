@@ -143,20 +143,23 @@ def compute_local_maps(
         PJ_batch = apply_above_curvature(l, jacobians[l])
         G_bar_next_reg = G_bar_next + ridge * jnp.eye(G_bar_next.shape[0])
 
+        # Symmetrize and invert G_bar_next_reg once as a 2D matrix.
+        # This completely avoids calling batched 3D cuSOLVER (cusolverDnBatched)
+        # on the GPU, which fails with internal handle errors in cloud/container environments.
+        G_bar_next_reg = 0.5 * (G_bar_next_reg + G_bar_next_reg.T)
+        inv_G = jnp.linalg.inv(G_bar_next_reg)
+
         if use_per_sample:
-            # Per-sample RHS: apply Π to each J^{(b)} then solve against the
-            # shared batch-averaged Ḡ. `jnp.linalg.solve` broadcasts over the
-            # leading batch dim (LU-decomposes Ḡ once, back-substitutes for B
-            # right-hand sides).
+            # Per-sample RHS: apply Π to each J^{(b)} then multiply by inv(Ḡ).
             J_per = jacobians_per_sample[l]                       # (B, d_out, d_in)
             PJ_per = jax.vmap(lambda J: apply_above_curvature(l, J))(J_per)
-            A_tildes[l] = jnp.linalg.solve(G_bar_next_reg, PJ_per)  # (B, d_out, d_in)
+            A_tildes[l] = jnp.einsum("ij,bjk->bik", inv_G, PJ_per)  # (B, d_out, d_in)
         else:
-            A_tildes[l] = jnp.linalg.solve(G_bar_next_reg, PJ_batch)  # (d_out, d_in)
+            A_tildes[l] = inv_G @ PJ_batch  # (d_out, d_in)
 
         if l > 0:
             # Schur update: uses the batch-averaged PJ (Fisher metric semantics).
-            schur = PJ_batch.T @ jnp.linalg.solve(G_bar_next_reg, PJ_batch)
+            schur = PJ_batch.T @ (inv_G @ PJ_batch)
             G_bar_next = build_H(l) - schur
 
     return A_tildes
@@ -226,3 +229,97 @@ def compute_causal_gates_per_sample(A_tildes_per_sample, p=2.0, kappa=1e-3):
         denom = jnp.sum(abs_A_p, axis=2, keepdims=True) + kappa    # (B, d_out, 1)
         gates.append(abs_A_p / denom)                              # (B, d_out, d_in)
     return gates
+
+
+def compute_meta_causal_gates_per_sample(
+    A_tildes_per_sample,
+    gate_p=2.0,
+    gate_kappa=1e-3,
+    beta_lcb=1.0,
+    tau=1e-3,
+    eps_exp=0.05,
+    past_support_masks=None,
+    protection_strength=0.8,
+):
+    gates = []
+    support_masks = []
+    mu_list = []
+    sigma_list = []
+
+    for l, A_k in enumerate(A_tildes_per_sample):
+        B = A_k.shape[0]
+        abs_A = jnp.abs(A_k)
+
+        mu = jnp.mean(abs_A, axis=0)
+        sigma = jnp.std(abs_A, axis=0) / jnp.sqrt(B + 1e-8)
+
+        mu_list.append(mu)
+        sigma_list.append(sigma)
+
+        lcb_per_sample = jax.nn.relu(abs_A - beta_lcb * sigma[None, :, :] - tau)
+        ucb_per_sample = jax.nn.relu(abs_A + beta_lcb * sigma[None, :, :] - tau)
+
+        if past_support_masks is not None and l < len(past_support_masks) and past_support_masks[l] is not None:
+            prot_factor = (1.0 - 0.5 * protection_strength * past_support_masks[l])[None, :, :]
+            lcb_per_sample = lcb_per_sample * prot_factor
+            ucb_per_sample = ucb_per_sample * prot_factor
+
+        eff_I = (1.0 - eps_exp) * lcb_per_sample + eps_exp * ucb_per_sample
+
+        eff_I_p = eff_I ** gate_p
+        denom = jnp.sum(eff_I_p, axis=2, keepdims=True) + gate_kappa
+        gate = eff_I_p / denom
+
+        gates.append(gate)
+
+        lcb_mean = mu - beta_lcb * sigma
+        q80 = jax.lax.stop_gradient(jnp.percentile(lcb_mean, 80.0))
+        eff_thresh = jnp.maximum(tau, q80)
+        scale_l = jax.lax.stop_gradient(jnp.std(lcb_mean) + 1e-6)
+        raw_mask = jax.nn.sigmoid(5.0 * (lcb_mean - eff_thresh) / scale_l)
+        support_mask = jnp.where(lcb_mean > eff_thresh, raw_mask, 0.0)
+        support_masks.append(support_mask)
+
+    return gates, support_masks, mu_list, sigma_list
+
+
+def compute_meta_causal_gates_from_stats(
+    mu_list,
+    sigma_list,
+    gate_p=2.0,
+    gate_kappa=1e-3,
+    beta_lcb=1.0,
+    tau=1e-3,
+    eps_exp=0.05,
+    past_support_masks=None,
+    protection_strength=0.8,
+):
+    gates = []
+    support_masks = []
+    for l in range(len(mu_list)):
+        mu = mu_list[l]
+        sigma = sigma_list[l]
+        lcb = jax.nn.relu(mu - beta_lcb * sigma - tau)
+        ucb = jax.nn.relu(mu + beta_lcb * sigma - tau)
+
+        if past_support_masks is not None and l < len(past_support_masks) and past_support_masks[l] is not None:
+            prot_factor = 1.0 - 0.5 * protection_strength * past_support_masks[l]
+            lcb = lcb * prot_factor
+            ucb = ucb * prot_factor
+
+        eff_I = (1.0 - eps_exp) * lcb + eps_exp * ucb
+        eff_I_p = eff_I ** gate_p
+        denom = jnp.sum(eff_I_p, axis=1, keepdims=True) + gate_kappa
+        gate = eff_I_p / denom
+        gates.append(gate)
+
+        lcb_mean = mu - beta_lcb * sigma
+        q80 = jax.lax.stop_gradient(jnp.percentile(lcb_mean, 80.0))
+        eff_thresh = jnp.maximum(tau, q80)
+        scale_l = jax.lax.stop_gradient(jnp.std(lcb_mean) + 1e-6)
+        raw_mask = jax.nn.sigmoid(5.0 * (lcb_mean - eff_thresh) / scale_l)
+        support_mask = jnp.where(lcb_mean > eff_thresh, raw_mask, 0.0)
+        support_masks.append(support_mask)
+
+    return gates, support_masks
+
